@@ -35,14 +35,12 @@ ApplicationWindow {
     readonly property var appState: workbench.state
     readonly property var summary: workbench.summary
     readonly property bool busy: !!appState.busy
-
     property bool returnToTasksWhenIdle: false
 
     function finishProcessingNavigation() {
         if (window.setupMode) return
         if (!returnToTasksWhenIdle || !appState || appState.busy) return
         returnToTasksWhenIdle = false
-        // Leave stopped or failed runs available for inspection in the log.
         if (appState.status === "就绪" && !appState.error) currentPage = 0
     }
     onAppStateChanged: finishProcessingNavigation()
@@ -51,7 +49,6 @@ ApplicationWindow {
         if (!workbench.start(action)) return
         returnToTasksWhenIdle = true
         currentPage = 1
-        // A fast operation may have finished before start() returned.
         finishProcessingNavigation()
     }
 
@@ -193,8 +190,10 @@ ApplicationWindow {
                     objectName: "accountDetails"; Layout.fillWidth: false; Layout.preferredWidth: window.width < 1100 ? 296 : 352
                     Layout.minimumWidth: 296; Layout.maximumWidth: Layout.preferredWidth
                     account: window.appState.account; model: window.appState.model; status: window.appState.status
+                    apiConfigured: !!window.appState.apiConfigured; apiTesting: !!window.appState.apiTesting
                     apiStatus: window.appState.apiStatus || ""; apiOk: !!window.appState.apiOk; apiFail: !!window.appState.apiFail
                     busy: window.busy; ready: !!window.appState.ready; hasError: !!window.appState.error
+                    onTestApiRequested: workbench.testApi()
                 }
             }
             CourseOverview {

@@ -12,7 +12,9 @@ import json
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
+from .accuracy_control import parse_target_accuracy
 from .paths import PROJECT_ROOT
+from .record_skip import normalize_skip_record_mode
 
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 
@@ -26,11 +28,17 @@ DEFAULT_CONFIG = {
     "model": "",
     "max_tokens": 32768,
     "temperature": 0.3,
+    "record_score_threshold": 70,
+    "score_threshold": 80,
+    "target_accuracy": "100",
+    "skip_record_mode": "off",
     "debug_mode": False,
     # 录音题（Exercise 2 这类主观题）没有原声，需要 TTS 生成语音
     "tts_engine": "auto",   # auto / edge / sapi / off
     "tts_voice": "",
     "tts_proxy": "",
+    "screenshot": False,
+    "answer_api_enabled": True,
     # 浏览器后端：edge（默认）/ chrome，见 unipus_helper/browser.py
     "browser": "edge",
 }
@@ -38,6 +46,7 @@ DEFAULT_CONFIG = {
 STRING_FIELDS = (
     "username", "password", "url", "token_full", "api_key", "base_url",
     "model", "tts_engine", "tts_voice", "tts_proxy", "browser",
+    "target_accuracy", "skip_record_mode",
 )
 
 
@@ -84,10 +93,22 @@ def normalize_config(data):
         out["temperature"] = float(data.get("temperature", DEFAULT_CONFIG["temperature"]))
     except (TypeError, ValueError):
         out["temperature"] = DEFAULT_CONFIG["temperature"]
-    value = data.get("debug_mode", False)
-    out["debug_mode"] = value is True or (
-        isinstance(value, str) and value.casefold() == "true"
-    )
+    for key in ("record_score_threshold", "score_threshold"):
+        try:
+            value = float(data.get(key, DEFAULT_CONFIG[key]))
+        except (TypeError, ValueError):
+            value = DEFAULT_CONFIG[key]
+        if not 0 <= value <= 100:
+            raise ValueError(f"{key} must be between 0 and 100")
+        out[key] = value
+    low, high, canonical = parse_target_accuracy(data.get("target_accuracy", "100"))
+    out["target_accuracy"] = canonical
+    out["skip_record_mode"] = normalize_skip_record_mode(data.get("skip_record_mode", "off"))
+    for key in ("debug_mode", "screenshot", "answer_api_enabled"):
+        value = data.get(key, DEFAULT_CONFIG[key])
+        out[key] = value is True or (
+            isinstance(value, str) and value.casefold() == "true"
+        )
     return out
 
 
@@ -101,8 +122,9 @@ def save_config(data):
 
 
 def is_config_ready():
-    """True when the minimum credential needed to boot the bot is present."""
-    return bool(_as_text(load_config().get("api_key")).strip())
+    """True when the U Campus credentials needed to boot the bot are present."""
+    config = load_config()
+    return bool(_as_text(config.get("username")).strip() and _as_text(config.get("password")).strip())
 
 
 class SettingsBridge(QObject):

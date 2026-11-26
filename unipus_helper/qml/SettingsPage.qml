@@ -23,12 +23,18 @@ Rectangle {
         modelField.text = String(c.model || "")
         maxTokensField.text = String(c.max_tokens === undefined ? 32768 : c.max_tokens)
         temperatureField.text = String(c.temperature === undefined ? 0.3 : c.temperature)
+        recordScoreThresholdField.text = String(c.record_score_threshold === undefined ? 70 : c.record_score_threshold)
+        scoreThresholdField.text = String(c.score_threshold === undefined ? 80 : c.score_threshold)
+        targetAccuracyField.text = String(c.target_accuracy === undefined ? "100" : c.target_accuracy)
+        skipRecordModeField.text = String(c.skip_record_mode || "off")
         ttsEngineField.text = String(c.tts_engine || "auto")
         ttsVoiceField.text = String(c.tts_voice || "")
         ttsProxyField.text = String(c.tts_proxy || "")
         browserField.text = String(c.browser || "edge")
         tokenField.text = String(c.token_full || "")
         debugCheck.checked = !!c.debug_mode
+        screenshotCheck.checked = !!c.screenshot
+        answerApiCheck.checked = c.answer_api_enabled !== false
     }
 
     function saveValues() {
@@ -42,11 +48,17 @@ Rectangle {
             "model": modelField.text,
             "max_tokens": maxTokensField.text,
             "temperature": temperatureField.text,
+            "record_score_threshold": recordScoreThresholdField.text,
+            "score_threshold": scoreThresholdField.text,
+            "target_accuracy": targetAccuracyField.text,
+            "skip_record_mode": skipRecordModeField.text,
             "debug_mode": debugCheck.checked,
             "tts_engine": ttsEngineField.text,
             "tts_voice": ttsVoiceField.text,
             "tts_proxy": ttsProxyField.text,
-            "browser": browserField.text
+            "browser": browserField.text,
+            "screenshot": screenshotCheck.checked,
+            "answer_api_enabled": answerApiCheck.checked
         })
         statusText.text = ok
             ? (page.firstRun ? "配置已保存，窗口即将关闭，请重新启动程序。"
@@ -147,6 +159,26 @@ Rectangle {
                     UiText { text: "浏览器"; Layout.preferredWidth: 128; color: Theme.secondary; font.pixelSize: 13 }
                     ConfigField { id: browserField; objectName: "cfg_browser"; placeholderText: "edge（默认）/ chrome" }
                 }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 16
+                    UiText { text: "录音、朗读达标分"; Layout.preferredWidth: 128; color: Theme.secondary; font.pixelSize: 13 }
+                    ConfigField { id: recordScoreThresholdField; objectName: "cfg_record_score_threshold"; placeholderText: "70（0-100）" }
+                }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 16
+                    UiText { text: "其余题型达标分"; Layout.preferredWidth: 128; color: Theme.secondary; font.pixelSize: 13 }
+                    ConfigField { id: scoreThresholdField; objectName: "cfg_score_threshold"; placeholderText: "80（0-100）" }
+                }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 16
+                    UiText { text: "目标正确率"; Layout.preferredWidth: 128; color: Theme.secondary; font.pixelSize: 13 }
+                    ConfigField { id: targetAccuracyField; objectName: "cfg_target_accuracy"; placeholderText: "100，或 85 / 80-90（实验性）" }
+                }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 16
+                    UiText { text: "跟读跳过"; Layout.preferredWidth: 128; color: Theme.secondary; font.pixelSize: 13 }
+                    ConfigField { id: skipRecordModeField; objectName: "cfg_skip_record_mode"; placeholderText: "off / follow_aloud / all（实验性）" }
+                }
 
                 RowLayout {
                     Layout.fillWidth: true; spacing: 16
@@ -189,6 +221,16 @@ Rectangle {
                     Layout.fillWidth: true; spacing: 16
                     UiText { text: "调试模式"; Layout.preferredWidth: 128; color: Theme.secondary; font.pixelSize: 13 }
                     UiCheck { id: debugCheck; objectName: "cfg_debug_mode"; text: "启用详细日志"; checked: false; Layout.fillWidth: true }
+                }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 16
+                    UiText { text: "识图模式"; Layout.preferredWidth: 128; color: Theme.secondary; font.pixelSize: 13 }
+                    UiCheck { id: screenshotCheck; objectName: "cfg_screenshot"; text: "题目截图发送给模型（需支持识图）"; checked: false; Layout.fillWidth: true }
+                }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 16
+                    UiText { text: "官方答案接口"; Layout.preferredWidth: 128; color: Theme.secondary; font.pixelSize: 13 }
+                    UiCheck { id: answerApiCheck; objectName: "cfg_answer_api_enabled"; text: "启用实验性官方答案接口"; checked: true; Layout.fillWidth: true }
                 }
             }
         }

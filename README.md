@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">  
-  <img alt="Version" src="https://img.shields.io/badge/version-3.9.10-2561C7">
+  <img alt="Version" src="https://img.shields.io/badge/version-3.9.18-2561C7">
   <img alt="GUI" src="https://img.shields.io/badge/gui-Qt_Quick-2561C7">
   <img alt="Browser" src="https://img.shields.io/badge/browser-Selenium-43B02A">
   <img alt="AI" src="https://img.shields.io/badge/api-OpenAI%20Compatible-111111">
@@ -21,6 +21,7 @@
 ## 特性
 
 - **多题型处理**：支持选择、填空、阅读、翻译、写作及音视频、录音等等题型，支持自动提交。
+- **官方答案与控分**：客观题可优先使用实验性官方答案接口；支持目标正确率、跟读/录音跳过和新版单元测试的选词填空、翻译等题型。
 - **批量与单页处理**：可扫描全部单元或当前单元批量处理，也可直接处理当前页面。
 - **任务筛选**：默认选择未完成必修，支持搜索、状态筛选和排除不计分任务。
 - **断点续跑**：完成一项自动取消勾选，停止后保留剩余选择，方便继续处理。

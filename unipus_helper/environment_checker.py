@@ -1,4 +1,3 @@
-# ==================== 环境检测 ====================
 import os
 import platform
 import tempfile
@@ -17,7 +16,6 @@ except ImportError:  # 允许把本文件当独立脚本调试
 
 
 class EnvironmentChecker:
-    """环境检测器"""
 
     FFMPEG_DOWNLOAD_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
 
@@ -26,23 +24,17 @@ class EnvironmentChecker:
         self.warnings: List[str] = []
         self.ffmpeg_path: Optional[str] = None
         self.ffprobe_path: Optional[str] = None
-        # 与 driver 使用同一份规格，避免检测与实际启动的浏览器不一致
         self.browser: BrowserSpec = get_spec(browser)
 
     def check_all(self) -> bool:
-        """执行完整环境检查"""
         print(" 正在检查运行环境...\n")
 
-        # 检查系统
         self._check_system()
 
-        # 检查浏览器
         self._check_browser()
 
-        # 检查 FFmpeg（新增）
         self._check_ffmpeg()
 
-        # 检查结果
         if self.issues:
             print("\n" + "=" * 60)
             print(" 发现以下问题需要修复：")
@@ -66,7 +58,6 @@ class EnvironmentChecker:
         return True
 
     def _check_system(self):
-        """检查系统信息"""
         print(f"   操作系统: {platform.system()} {platform.release()}")
         print(f"   架构: {platform.machine()}")
         print(f"   Python: {platform.python_version()}")
@@ -76,7 +67,6 @@ class EnvironmentChecker:
                 f"非 Windows / macOS 系统，可能无法正常使用 {self.browser.display_name}")
 
     def _check_browser(self):
-        """检查配置指定的浏览器是否已安装。"""
         path = self.browser.detect_install_path()
         if path:
             print(f"    {self.browser.display_name}: {path}")
@@ -88,10 +78,8 @@ class EnvironmentChecker:
             return
         self.issues.append("   → 请手动安装：" + " / ".join(self.browser.manual_install_hint))
 
-    # ==================== 新增：FFmpeg 检测 ====================
 
     def _check_ffmpeg(self):
-        """检查 FFmpeg 安装和 Path 配置"""
         print("   检查 FFmpeg...")
 
         # FFmpeg 已随程序内置：把内置目录注入 PATH，让 which / whisper 直接命中。
@@ -114,7 +102,6 @@ class EnvironmentChecker:
                 print("         FFprobe 路径: 未检测到")
             return
 
-        # 方法2：检查常见安装路径
         common_paths = [
             r'C:\ffmpeg\bin\ffmpeg.exe',
             r'C:\Program Files\ffmpeg\bin\ffmpeg.exe',
@@ -138,11 +125,9 @@ class EnvironmentChecker:
                 self.issues.append("  FFmpeg 已安装但未添加到系统环境变量 PATH")
                 return
 
-        # 未安装
         self.issues.append(" 未检测到 FFmpeg（语音识别需要）")
 
     def _get_ffmpeg_version(self, ffmpeg_path: str) -> str:
-        """获取 FFmpeg 版本"""
         try:
             result = subprocess.run(
                 [ffmpeg_path, "-version"],
@@ -150,7 +135,6 @@ class EnvironmentChecker:
                 text=True,
                 timeout=5
             )
-            # 第一行格式: ffmpeg version 6.0-full_build-www.gyan.dev
             first_line = result.stdout.split('\n')[0]
             version = first_line.split()[2] if len(first_line.split()) > 2 else "未知版本"
             return version
@@ -158,7 +142,6 @@ class EnvironmentChecker:
             return "未知版本"
 
     def _resolve_ffprobe_path(self, ffmpeg_path: str, prefer_path_lookup: bool = False) -> Optional[str]:
-        """根据 ffmpeg 路径或 PATH 推断 ffprobe 路径"""
         if prefer_path_lookup:
             ffprobe_in_path = shutil.which("ffprobe")
             if ffprobe_in_path:
@@ -173,10 +156,8 @@ class EnvironmentChecker:
 
         return None
 
-    # ==================== 修复选项 ====================
 
     def show_fix_guide(self):
-        """显示修复指南"""
         install_option = (f"自动下载并安装 {self.browser.display_name} 浏览器"
                           if self.browser.supports_auto_install
                           else f"查看 {self.browser.display_name} 手动安装说明")
@@ -202,10 +183,8 @@ class EnvironmentChecker:
         choice = input("\n请输入选项 (1/2/3/4/5/Q): ").strip().upper()
         return choice
 
-    # ==================== 新增：FFmpeg 自动安装 ====================
 
     def auto_install_ffmpeg(self) -> bool:
-        """自动下载并安装 FFmpeg"""
         if platform.system() != "Windows":
             print("\n  当前系统不是 Windows，自动安装流程只适用于 Windows，改用包管理器：")
             print("     macOS:  brew install ffmpeg")
@@ -215,10 +194,8 @@ class EnvironmentChecker:
         print("   来源: https://github.com/BtbN/FFmpeg-Builds")
 
         try:
-            # 下载路径
             zip_path = os.path.join(tempfile.gettempdir(), "ffmpeg.zip")
 
-            # 显示进度
             def download_progress(block_num, block_size, total_size):
                 downloaded = block_num * block_size
                 percent = min(100, downloaded * 100 / total_size)
@@ -231,13 +208,11 @@ class EnvironmentChecker:
                 zip_path,
                 reporthook=download_progress
             )
-            print()  # 换行
+            print()
 
-            # 解压
             print("    解压文件...")
             extract_dir = os.path.expandvars(r'%LOCALAPPDATA%\ffmpeg')
 
-            # 清理旧版本
             if os.path.exists(extract_dir):
                 shutil.rmtree(extract_dir, ignore_errors=True)
 
@@ -246,7 +221,6 @@ class EnvironmentChecker:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
 
-            # 找到实际的 bin 目录
             bin_dir = None
             for root, dirs, files in os.walk(extract_dir):
                 if 'ffmpeg.exe' in files and 'bin' in root:
@@ -254,7 +228,6 @@ class EnvironmentChecker:
                     break
 
             if not bin_dir:
-                # 可能是直接解压到子目录
                 subdirs = [d for d in os.listdir(extract_dir) if os.path.isdir(os.path.join(extract_dir, d))]
                 if subdirs:
                     potential_bin = os.path.join(extract_dir, subdirs[0], 'bin')
@@ -265,13 +238,10 @@ class EnvironmentChecker:
                 print("    解压后未找到 ffmpeg.exe")
                 return False
 
-            # 添加到系统 PATH
             print("    添加到系统环境变量...")
             self._add_to_system_path(bin_dir)
 
-            # 验证
             print("    验证安装...")
-            # 刷新环境变量
             os.environ['PATH'] = bin_dir + os.pathsep + os.environ.get('PATH', '')
 
             ffmpeg_exe = os.path.join(bin_dir, 'ffmpeg.exe')
@@ -284,7 +254,6 @@ class EnvironmentChecker:
             else:
                 print("      FFprobe 路径: 未检测到")
 
-            # 清理下载文件
             try:
                 os.remove(zip_path)
             except:
@@ -300,12 +269,10 @@ class EnvironmentChecker:
             return False
 
     def add_ffmpeg_to_path(self) -> bool:
-        """将已安装的 FFmpeg 添加到系统 PATH"""
         if not self.ffmpeg_path:
             print("    未检测到已安装的 FFmpeg")
             return False
 
-        # 找到 bin 目录
         bin_dir = os.path.dirname(self.ffmpeg_path)
 
         print(f"\n 正在添加到系统 PATH...")
@@ -328,15 +295,12 @@ class EnvironmentChecker:
             return False
 
     def _add_to_system_path(self, bin_dir: str):
-        """将目录添加到系统 PATH 环境变量"""
         if platform.system() != "Windows":
-            # 非 Windows 没有注册表 PATH，写 shell 配置文件即可
             print("    非 Windows 平台请把下面这行加进 ~/.zshrc 或 ~/.bash_profile：")
             print(f'      export PATH="{bin_dir}:$PATH"')
             return
         import winreg
 
-        # 获取当前系统 PATH
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
             r"Environment",
@@ -349,18 +313,15 @@ class EnvironmentChecker:
         except:
             current_path = ""
 
-        # 检查是否已存在
         paths = [p.strip() for p in current_path.split(os.pathsep) if p.strip()]
         if bin_dir in paths:
             print("   ℹ  该路径已在 PATH 中")
             return
 
-        # 添加新路径
         new_path = bin_dir + os.pathsep + current_path if current_path else bin_dir
         winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, new_path)
         winreg.CloseKey(key)
 
-        # 通知系统环境变量已更改
         import ctypes
         HWND_BROADCAST = 0xFFFF
         WM_SETTINGCHANGE = 0x1A
@@ -378,10 +339,8 @@ class EnvironmentChecker:
 
         print("    系统环境变量已更新")
 
-    # ==================== 其他修复选项（保持原有）====================
 
     def auto_install_browser(self) -> bool:
-        """按浏览器规格下载安装程序；不支持自动安装时只打印手动安装指引。"""
         if not self.browser.installer_url:
             print(f"\n  {self.browser.display_name} 需要手动安装：")
             for hint in self.browser.manual_install_hint:
@@ -411,7 +370,6 @@ class EnvironmentChecker:
             return False
 
     def manual_specify_path(self) -> Optional[str]:
-        """手动指定 FFmpeg 路径"""
         print("\n" + "-" * 60)
         print("手动指定路径")
         print("-" * 60)

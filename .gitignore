@@ -37,3 +37,7 @@ whisper_models/*
 installer/*.exe
 installer/*.zip
 installer/*.dmg
+# 官方答案接口的本地答案缓存（按天失效）
+.cache/
+# 本地分析文档，不进版本库
+docs/answer-api.md

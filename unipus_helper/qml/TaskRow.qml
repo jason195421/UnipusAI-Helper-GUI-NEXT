@@ -58,8 +58,6 @@ Item {
         objectName: "task_" + row.taskId
         anchors.fill: parent; anchors.topMargin: row.sectionHeader ? 36 : 0
         enabled: row.editable; hoverEnabled: true
-        // The model owns selection. Do not let a rejected click leave a local
-        // checked state out of sync with the Python controller.
         checkable: false; checked: row.chosen
         focusPolicy: Qt.StrongFocus
         leftPadding: 24; rightPadding: 24; topPadding: 0; bottomPadding: 0
@@ -113,14 +111,16 @@ Item {
                 UiText { anchors.centerIn: parent; text: row.isRequired ? "必修" : "选修"; color: row.isRequired ? Theme.requiredInk : Theme.secondary; font.pixelSize: 13 }
             }
             UiText { text: row.scored === false ? "不计分" : row.scored === null ? "待确认" : "计分"; color: Theme.secondary; font.pixelSize: 13; Layout.preferredWidth: 64; horizontalAlignment: Text.AlignHCenter }
-            Rectangle {
-                objectName: "score_" + row.taskId
-                visible: row.scoreText !== ""
-                Layout.preferredWidth: 64; Layout.preferredHeight: 24; radius: Theme.radiusSm
-                color: row.scoreAbnormal ? "#5c1f1f" : Theme.successSurface
-                UiText {
-                    anchors.centerIn: parent; text: row.scoreText; font.pixelSize: 13
-                    color: row.scoreAbnormal ? Theme.error : Theme.success
+            Item {
+                Layout.preferredWidth: 64; Layout.preferredHeight: 24
+                Rectangle {
+                    objectName: "score_" + row.taskId
+                    anchors.fill: parent; visible: row.scoreText !== ""; radius: Theme.radiusSm
+                    color: row.scoreAbnormal ? "#5c1f1f" : Theme.successSurface
+                    UiText {
+                        anchors.centerIn: parent; text: row.scoreText; font.pixelSize: 13
+                        color: row.scoreAbnormal ? Theme.error : Theme.success
+                    }
                 }
             }
             Rectangle {

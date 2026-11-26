@@ -1,14 +1,139 @@
-"""Course directory scanning independent of UI rendering."""
 import re
 import time
 from urllib.parse import parse_qs, urlsplit
+
+from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
 
 from .task_grading import (READ_GRADING_JS, assign_task_records, build_record_index,
                            grading_text, score_text)
 
 
+def describe_directory_page_state(driver) -> dict:
+    fallback_url = ''
+    fallback_title = ''
+    try:
+        raw_url = getattr(driver, 'current_url', '')
+        if isinstance(raw_url, str):
+            fallback_url = raw_url
+        raw_title = getattr(driver, 'title', '')
+        if isinstance(raw_title, str):
+            fallback_title = raw_title
+    except Exception:
+        pass
+    try:
+        res = driver.execute_script("""
+            const clean = t => (t || '').replace(/\\s+/g, ' ').trim();
+            const vis = el => !!el && !!el.getClientRects().length;
+            return {
+                url: location.href || '',
+                title: document.title || '',
+                ready_state: document.readyState || '',
+                body_head: clean(document.body && document.body.innerText).slice(0, 80),
+                unit_count: document.querySelectorAll('[class*="unitTabScrollContainer"] > *').length,
+                task_count: [...document.querySelectorAll(
+                    '[class*="taskItemInnerLayout"], [class*="nodeItemInnerLayout"]')].filter(vis).length,
+                spinning: [...document.querySelectorAll('.ant-spin-spinning, [aria-busy="true"]')].some(vis)
+            };
+        """)
+        if isinstance(res, dict):
+            return res
+    except Exception:
+        pass
+    return {
+        'url': fallback_url,
+        'title': fallback_title,
+        'ready_state': '',
+        'body_head': '',
+        'unit_count': 0,
+        'task_count': 0,
+        'spinning': False,
+    }
+
+
+def select_course_unit(driver, target, stop_requested=None,
+                       timeout: float = 12.0,
+                       stable_same_signature_sec: float = 2.5):
+    if stop_requested is not None and stop_requested.is_set():
+        raise TimeoutException('单元切换已停止')
+    state_script = """
+        const tab = arguments[0];
+        const visible = el => !!el && !!el.getClientRects().length;
+        const clean = t => (t || '').replace(/\\s+/g, ' ').trim();
+        const cls = String(tab.className);
+        const selected = tab.getAttribute('aria-selected');
+        const active = selected === 'true' || (selected !== 'false' &&
+            (/tabactive|slideractive/i.test(cls) ||
+             !!tab.querySelector('[class*="sliderActive"]') ||
+             /(?:^|[\\s_-])(active|selected|current)(?:$|[\\s_-])/i.test(cls)));
+        const panelId = tab.getAttribute('aria-controls');
+        const panel = panelId ? document.getElementById(panelId) :
+            [...document.querySelectorAll('[aria-labelledby]')].find(
+                el => tab.id && el.getAttribute('aria-labelledby') === tab.id);
+        const root = panel || document;
+        const tasks = [...root.querySelectorAll(
+            '[class*="taskItemInnerLayout"], [class*="nodeItemInnerLayout"]')].filter(visible);
+        const headers = [...root.querySelectorAll('.ant-collapse-header, [class*="unitTitle"], [class*="unitName"]')]
+            .filter(el => visible(el) && !el.closest('[class*="unitTabScrollContainer"]'))
+            .map(el => clean(el.innerText));
+        const loading = [...root.querySelectorAll('.ant-spin-spinning, [aria-busy="true"]')].some(visible);
+        const taskSig = tasks.map(el => {
+            const ds = el.dataset ? JSON.stringify(el.dataset) : '';
+            return ds + '|' + el.innerHTML;
+        }).join('\\n');
+        return {active, linked: !!panel, ready: (!panel || visible(panel)) && !loading && tasks.length > 0,
+                loading, taskCount: tasks.length,
+                signature: headers.join('|') + '\\n' + taskSig};
+    """
+    before = driver.execute_script(state_script, target)
+    previous = driver.find_elements(By.CSS_SELECTOR, CourseCatalogMixin.TASK_ITEM_SELECTOR)
+    driver.execute_script("arguments[0].click();", target)
+
+    stable_since = None
+    last_state = None
+
+    def ready(_):
+        nonlocal stable_since, last_state
+        if stop_requested is not None and stop_requested.is_set():
+            raise TimeoutException('单元切换已停止')
+        state = driver.execute_script(state_script, target)
+        last_state = state
+        if not state['active'] or not state['ready']:
+            stable_since = None
+            return False
+        if before['active'] or state['linked'] or state['signature'] != before['signature']:
+            return True
+        all_gone = True
+        for element in previous:
+            try:
+                if element.is_displayed():
+                    all_gone = False
+                    break
+            except StaleElementReferenceException:
+                pass
+        if all_gone:
+            return True
+        now = time.monotonic()
+        if stable_since is None:
+            stable_since = now
+            return False
+        return (now - stable_since) >= stable_same_signature_sec
+
+    try:
+        WebDriverWait(driver, timeout).until(ready)
+    except TimeoutException:
+        if stop_requested is not None and stop_requested.is_set():
+            raise
+        if isinstance(last_state, dict):
+            raise TimeoutException(
+                f"切换Unit超时({timeout:g}s, active={last_state.get('active')}, "
+                f"ready={last_state.get('ready')}, tasks={last_state.get('taskCount', '?')})"
+            ) from None
+        raise
+
+
 class CourseCatalogMixin:
-    """Requires a Selenium driver, solver, logger and Selenium wait helpers."""
 
     def scan_tasks(self, current_unit_only=False):
         tabs = self._scan_course_directory(current_unit_only)
@@ -44,7 +169,7 @@ class CourseCatalogMixin:
             '[class*="taskItemInnerLayout"], [class*="nodeItemInnerLayout"]')];
         const out = [];
         all.forEach((el, index) => {
-          // 切 Unit 后旧面板仍留在 DOM 里，只取当前可见的那一份，否则任务会成倍重复
+
           if (!el.getClientRects().length) return;
           const nameEl = el.querySelector('[class*="taskTypeName"], [class*="nodeTypeName"]');
           const statusEl = el.querySelector('[class*="nodePassStateTip"]');
@@ -78,7 +203,6 @@ class CourseCatalogMixin:
 
     @staticmethod
     def _parse_unit_label(label: str):
-        """把 Unit 标签解析成 (显示名, 是否预习单元)。预习单元不占 Unit 序号。"""
         text = (label or "").strip()
         match = re.search(r'unit\s*([0-9]+)', text, re.I)
         if match:
@@ -150,13 +274,10 @@ class CourseCatalogMixin:
                 name_counts = {}
                 if click_tab:
                     try:
-                        self.driver.execute_script("arguments[0].click();", info["element"])
+                        select_course_unit(self.driver, info["element"])
                     except Exception:
-                        try:
-                            info["element"].click()
-                        except Exception:
-                            return
-                    time.sleep(0.9)
+                        self.gui_log_queue.put(f"单元 {info['display']} 未确认加载完成，跳过扫描")
+                        return
                 tasks = self.driver.execute_script(self.READ_TASKS_JS) or []
                 elements = self.driver.find_elements(self.By.CSS_SELECTOR, self.TASK_ITEM_SELECTOR)
                 for task in tasks:
@@ -200,7 +321,6 @@ class CourseCatalogMixin:
                     })
 
             if current_unit_only:
-                # 只读「当前已经打开」的那个单元：不点任何 tab，直接抓现行 DOM
                 info = active_info or {
                     "index": 0,
                     "label": "",
@@ -222,7 +342,6 @@ class CourseCatalogMixin:
         return tabs
 
     def _enrich_task_grading(self, tabs):
-        """读取学习记录，不切换目录单元，也不触发任务学习或提交。"""
         index = {}
         try:
             route = urlsplit(self.driver.current_url)
@@ -233,7 +352,6 @@ class CourseCatalogMixin:
                 result = self.driver.execute_async_script(READ_GRADING_JS, resource.group(1), unit_ids) or {}
                 index = build_record_index(result.get('units') or [])
         except Exception:
-            # 不让记录接口失败阻断目录扫描，且不在日志中暴露响应或登录凭据。
             self.gui_log_queue.put('学习记录计分标记读取失败，保留任务并标记为计分未知')
         assign_task_records(tabs, index)
         for tab in tabs:
@@ -252,7 +370,6 @@ class CourseCatalogMixin:
     @staticmethod
     def _format_task_display(compulsory, unit_name, section, name, status_text):
         prefix = "[必修]" if compulsory else "[选修]"
-        # 目录里的折叠标题经常重复（Course preview / Course preview），去重后更易读
         section_parts = [part.strip() for part in (section or "").split("/") if part.strip()]
         section = " / ".join(dict.fromkeys(section_parts))
         if section.strip().lower() == (name or "").strip().lower():
@@ -271,11 +388,12 @@ class CourseCatalogMixin:
             return bool(self.driver.execute_script("""
                 const el = arguments[0];
                 if (el.getAttribute('aria-selected') === 'true') return true;
+                if (el.getAttribute('aria-selected') === 'false') return false;
                 const cls = String(el.className);
-                // 目录 tab 的当前项带 tabActive，滑条带 sliderActive
+
                 if (/tabactive|slideractive/i.test(cls)) return true;
                 if (el.querySelector('[class*="sliderActive"]')) return true;
-                return /active|selected|current/i.test(cls);
+                return /(?:^|[\\s_-])(active|selected|current)(?:$|[\\s_-])/i.test(cls);
             """, element))
         except Exception:
             return False

@@ -1,7 +1,8 @@
-"""Qt Quick workbench. No web server or browser engine is used by this UI."""
 from __future__ import annotations
 
 import logging
+import json
+import os
 import signal
 import sys
 from logging.handlers import RotatingFileHandler
@@ -14,6 +15,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 from shiboken6 import delete as delete_qt_object
 
+from .accuracy_control import parse_target_accuracy
 from .paths import PROJECT_ROOT, QML_DIR
 from .platform_theme import register_platform_theme
 from .settings import SettingsBridge
@@ -21,10 +23,168 @@ from .task_grading import score_text
 from .workbench_controller import WorkbenchController
 
 
+DEFAULT_CONFIG = {
+    "username": "",
+    "password": "",
+    "url": "https://uai.unipus.cn/sso/index.html?service=https%3A%2F%2Fucloud.unipus.cn%2Fhome",
+    "token_full": "",
+    "api_key": "",
+    "base_url": "",
+    "model": "",
+    "max_tokens": 32768,
+    "temperature": 0.3,
+    "record_score_threshold": 70,
+    "score_threshold": 80,
+    "target_accuracy": 100,
+    "skip_record_mode": "off",
+    "debug_mode": False,
+    "tts_engine": "auto",
+    "tts_voice": "",
+    "tts_proxy": "",
+    "browser": "edge",
+    "screenshot": False,
+    "answer_api_enabled": True,
+}
+
+
+def config_bool(value, default=False):
+    """布尔配置归一化：兼容 JSON 布尔、0/1 与 "false"/"off" 这类字符串。"""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in ("", "none", "null"):
+        return default
+    return text not in ("0", "false", "no", "off", "disabled", "disable")
+
+
+def load_config(path):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        merged = dict(DEFAULT_CONFIG)
+        merged.update(cfg)
+        return merged
+    return dict(DEFAULT_CONFIG)
+
+
+def save_config(path, data: dict):
+    out = dict(data)
+    token = out.get("token_full", "")
+    if token and isinstance(token, str):
+        token = token.strip()
+        if (token.startswith("'") and token.endswith("'")) or (
+            token.startswith('"') and token.endswith('"')
+        ):
+            token = token[1:-1].strip()
+        out["token_full"] = token
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(out, f, indent=2, ensure_ascii=False)
+    return True
+
+
+class ConfigEditor(QObject):
+    saved = Signal(str, bool)
+
+    def __init__(self, path, first_run=False):
+        super().__init__()
+        self.path = path
+        self.first_run = first_run
+        self.completed = False
+        self.cfg = load_config(path)
+
+    @Property("QVariantMap", constant=True)
+    def values(self):
+        return self.cfg
+
+    @Property(bool, constant=True)
+    def firstRun(self):
+        return self.first_run
+
+    @Slot("QVariantMap")
+    def save(self, values):
+        data = dict(self.cfg)
+        data.update(values)
+        for key in DEFAULT_CONFIG:
+            if key in ("debug_mode", "screenshot", "answer_api_enabled"):
+                continue
+            if key in data:
+                data[key] = str(data[key]).strip()
+        missing = [label for key, label in (("username", "账号"), ("password", "密码")) if not data.get(key)]
+        if missing:
+            self.saved.emit("请填写必填项：" + "、".join(missing), False)
+            return
+        ai_fields = (("api_key", "API Key"), ("base_url", "API 地址"), ("model", "模型名称"))
+        filled_ai = [key for key, _ in ai_fields if data.get(key)]
+        if 0 < len(filled_ai) < len(ai_fields):
+            missing_ai = [label for key, label in ai_fields if not data.get(key)]
+            self.saved.emit("如需启用 AI，请补全：" + "、".join(missing_ai) + "（或全部留空仅用官方答案）", False)
+            return
+        data["debug_mode"] = bool(data.get("debug_mode", False))
+        data["screenshot"] = bool(data.get("screenshot", False))
+        data["answer_api_enabled"] = config_bool(data.get("answer_api_enabled", True), True)
+        try:
+            data["max_tokens"] = int(data["max_tokens"])
+        except (ValueError, TypeError):
+            data["max_tokens"] = 32768
+        try:
+            data["temperature"] = float(data["temperature"])
+        except (ValueError, TypeError):
+            data["temperature"] = 0.3
+        for key, label in (("record_score_threshold", "录音、朗读达标分"),
+                           ("score_threshold", "其余题型达标分")):
+            try:
+                data[key] = float(data[key])
+                if not 0 <= data[key] <= 100:
+                    raise ValueError
+            except (ValueError, TypeError):
+                self.saved.emit(f"{label}必须是 0–100 之间的分数", False)
+                return
+        try:
+            acc_low, acc_high, acc_text = parse_target_accuracy(data.get("target_accuracy", 100))
+            if acc_low == acc_high:
+                data["target_accuracy"] = int(acc_low) if acc_low.is_integer() else acc_low
+            else:
+                data["target_accuracy"] = acc_text
+        except ValueError as exc:
+            self.saved.emit(str(exc), False)
+            return
+        try:
+            data["skip_record_mode"] = normalize_skip_record_mode(data.get("skip_record_mode", "off"))
+        except ValueError as exc:
+            self.saved.emit(str(exc), False)
+            return
+        try:
+            save_config(self.path, data)
+        except Exception as exc:
+            self.saved.emit(f"保存失败：{exc}", False)
+            return
+        self.cfg = data
+        self.completed = True
+        self.saved.emit("配置已保存" if self.first_run else "配置已保存，重新启动后生效", True)
+
+
+def setup_first_run():
+    QQuickStyle.setStyle("Basic")
+    app = QGuiApplication.instance() or QGuiApplication(sys.argv[:1])
+    configure_ui_font(app)
+    editor = ConfigEditor(PROJECT_ROOT / "config.json", first_run=True)
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("configEditor", editor)
+    engine.load(QUrl.fromLocalFile(str(QML_DIR / "ConfigEditor.qml")))
+    if not engine.rootObjects():
+        raise RuntimeError("配置界面加载失败")
+    app.exec()
+    delete_qt_object(engine)
+    return app, editor.completed
+
+
 def configure_ui_font(app):
     families = set(QFontDatabase.families())
-    # Prefer the platform's UI face rather than a document font with light
-    # named subfamilies. Keep explicit fallbacks for macOS and Linux.
     preferred = (("Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC")
                  if sys.platform == "win32" else
                  ("PingFang SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei UI"))
@@ -36,7 +196,6 @@ def configure_ui_font(app):
 
 
 class TaskListModel(QAbstractListModel):
-    """Keep delegates and scroll position when only selection/status changes."""
     fields = ("taskId", "title", "isRequired", "status", "chosen", "scored", "statusName",
               "sectionHeader", "selectable", "scoreText", "scoreAbnormal")
     roles = {Qt.UserRole + i + 1: name.encode() for i, name in enumerate(fields)}
@@ -58,7 +217,6 @@ class TaskListModel(QAbstractListModel):
         return self.rows[index.row()].get(name.decode()) if name else None
 
     def update(self, rows):
-        # Notify insertions/removals explicitly for empty search transitions.
         if self.rows and not rows:
             self.beginRemoveRows(QModelIndex(), 0, len(self.rows) - 1)
             self.rows = []
@@ -84,7 +242,6 @@ class TaskListModel(QAbstractListModel):
 
 
 def task_section_label(section, title):
-    """Keep task names in rows rather than repeating them in section headings."""
     parts = []
     for part in section.split("/"):
         part = part.strip()
@@ -210,6 +367,10 @@ class NativeBridge(QObject):
         self._result(self.controller.restart_browser())
 
     @Slot()
+    def testApi(self):
+        self._result(self.controller.test_api())
+
+    @Slot()
     def copyLogs(self):
         QGuiApplication.clipboard().setText("\n".join(
             f'{row["time"]}  {row["message"]}' for row in self._state["logs"]))
@@ -330,8 +491,6 @@ class NativeModernGUI(WorkbenchController):
             engine.load(QUrl.fromLocalFile(str(QML_DIR / "Main.qml")))
             if not engine.rootObjects():
                 raise RuntimeError(f"QML 界面加载失败，诊断日志：{log_path}")
-            # Visible rows are lightweight. Finish their creation synchronously
-            # so rapid filtering cannot cancel delegates with obsolete indices.
             engine.setIncubationController(None)
             window = engine.rootObjects()[0]
             if screenshot:
@@ -354,7 +513,6 @@ class NativeModernGUI(WorkbenchController):
             for sig, previous in previous_signals.items():
                 signal.signal(sig, previous)
             self.close()
-            # Destroy QML bindings while their Python objects still exist.
             delete_qt_object(engine)
             delete_qt_object(bridge)
             delete_qt_object(settings_bridge)
