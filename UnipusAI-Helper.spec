@@ -22,7 +22,7 @@ import os
 import platform as _platform
 import sys as _sys
 
-APP_VERSION = "3.9.10"
+APP_VERSION = "3.9.19"
 
 BUILD_MODE = os.environ.get("UNIPUS_BUILD_MODE", "release").strip().lower()
 if BUILD_MODE not in ("debug", "release"):

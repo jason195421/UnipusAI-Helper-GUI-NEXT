@@ -31,7 +31,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-APP_VERSION = "3.9.10"
+APP_VERSION = "3.9.19"
 DIST = ROOT / "dist"
 INSTALLER_DIR = ROOT / "installer"
 ISS = INSTALLER_DIR / "UnipusAI-Helper.iss"

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">  
-  <img alt="Version" src="https://img.shields.io/badge/version-3.9.18-2561C7">
+  <img alt="Version" src="https://img.shields.io/badge/version-3.9.19-2561C7">
   <img alt="GUI" src="https://img.shields.io/badge/gui-Qt_Quick-2561C7">
   <img alt="Browser" src="https://img.shields.io/badge/browser-Selenium-43B02A">
   <img alt="AI" src="https://img.shields.io/badge/api-OpenAI%20Compatible-111111">
@@ -212,6 +212,8 @@ Aqua 风格；同一套 Qt Quick / QML 界面按平台自动切换配色、圆�
 
 <details>
 <summary><b>点击展开完整更新日志</b></summary>
+
+- **v3.9.19（2026-11-27）**：修复长文本输入框聚焦与提交问题，并消除视频任务重复播放（issue #75）；包含新版单元测试选词填空与翻译题型修复（issue #74）。
 
 <details>
 <summary><b>v3.9.10（2026-11-14）</b>：安装包 / debug 与 release 双版本 / 纯 GUI 启动 / 双平台 CI</summary>
