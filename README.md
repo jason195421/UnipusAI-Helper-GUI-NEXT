@@ -30,9 +30,12 @@
 - **轻量动效**：页面淡入、按钮按压、任务勾选与进度平滑过渡；支持可用的系统「减少动态效果」偏好，也可设置 `UNIPUS_REDUCED_MOTION=1` 强制关闭动效，`UNIPUS_THEME=dark|light` 可固定主题。
 - **平台自适应界面**：Windows 采用 WinUI 3 / Fluent 风格（Mica 渐变、圆角、系统强调色、浅/深色跟随系统），macOS 采用原生 Aqua 风格，一套 Qt Quick 界面按平台自动切换。
 - **内置 FFmpeg**：语音识别所需的 `ffmpeg` / `ffprobe` 随程序打包，启动时自动加入 PATH，无需联网下载或手工安装。
-- **双版本构建**：每个平台都提供 **release**（纯 GUI、无终端窗口）与 **debug**（保留控制台输出便于排错）两种构建，由 `UNIPUS_BUILD_MODE` 一键切换；release 版启动时自动把标准输出/错误重定向到日志文件，致命错误改为系统弹窗。
+- **双版本构建**：桌面平台提供 **release**（纯 GUI、无终端窗口）与 **debug**（保留控制台输出便于排错）两种构建，由 `UNIPUS_BUILD_MODE` 一键切换；release 版启动时自动把标准输出/错误重定向到日志文件，致命错误改为系统弹窗。
 - **安装包发布**：Windows 分开构建 Inno Setup 安装版与便携版；便携 ZIP 使用最高 Deflate 压缩，PyInstaller 可执行文件使用经 SHA-256 校验的 UPX 压缩；macOS 用 `hdiutil` 生成 `.dmg`（release 为可拖入「应用程序」的 `.app`，debug 附带 `Run-Debug.command`）。
 - **双平台自动构建**：`.github/workflows/build-windows.yml` 将 Windows payload、便携版与安装版分开为独立 job；`build-macos.yml` 在 `macos-15`（arm64）/ `macos-15-intel`（x64）上按 debug × release 矩阵构建，打 `v*` 标签时发布到 GitHub Release。macOS 配置与日志写入 `~/Library/Application Support/UnipusAI-Helper/`，保持应用包只读。
+- **Android 独立版（开发验证中）**：原生触屏界面与内置 WebView 在手机上运行，嵌入 Python 复用任务处理逻辑，支持深色模式和动画开关。构建、安装及功能边界见 [安卓说明](android/README.md)；当前不宣称已完成真机或真实课程验证。
+
+上面的桌面浏览器、Whisper、FFmpeg 与自动录音能力不全部适用于安卓；安卓版的支持范围以 [安卓说明](android/README.md#当前功能与限制) 为准。
 
 ---
 
@@ -62,10 +65,11 @@ UnipusAI-Helper/
 │   ├── ffmpeg_runtime.py      # 内置 FFmpeg 定位与 PATH 注入
 │   ├── platform_theme.py     # 平台 / 明暗 / 强调色检测（注入 QML）
 │   └── qml/                  # 原生界面组件、主题与图标
+├── android/                   # Android 原生界面、WebView 内核与 APK 构建配置
 ├── ffmpeg/                    # 内置 FFmpeg 二进制（脚本下载生成，不提交）
 ├── scripts/                   # fetch_ffmpeg.py / build_variant.py / smoke_test.py 等
 ├── installer/                 # Inno Setup 脚本与生成的安装包（不提交）
-├── .github/workflows/         # GitHub Actions：Windows / macOS 双平台 debug+release 构建
+├── .github/workflows/         # GitHub Actions：桌面构建与 Android debug APK 构建
 ├── docs/                      # 工作台说明与截图
 ├── logs/                      # 本地运行日志（不提交）
 └── config-backups/            # 本地配置备份（不提交）
@@ -99,6 +103,18 @@ py -m venv .venv
 ```powershell
 .venv\Scripts\python.exe UnipusAI_Helper.py --skip-check
 ```
+
+### Android（手机独立运行）
+
+安卓版使用独立的原生界面与内置 WebView，运行时不需要电脑在线，也无需在手机上安装桌面 Python、Edge 或 ChromeDriver。安装后可在「课程浏览器」登录，再到「任务」扫描并选择任务；账号和 API 设置保存在应用私有目录。
+
+当前提供的是开发版构建流程。只有 Android 工作流成功完成后，才会在该次 Actions 的 Artifacts 中出现 `unipus-helper-android-debug`；不要把桌面版 Release 产物当作 APK。也可在仓库根目录构建：
+
+```powershell
+py -3.12 scripts/build_android.py --bootstrap
+```
+
+成功后 APK 位于 `android/app/build/outputs/apk/debug/app-debug.apk`。适用设备、手动登录与麦克风权限、构建前提和未支持功能见 [完整安卓说明](android/README.md)。
 
 ### macOS
 

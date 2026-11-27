@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import sys
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -12,6 +13,12 @@ def _project_root() -> Path:
     to the standard Application Support location instead.  QML_DIR and the
     bundled FFmpeg live inside the bundle and are deliberately NOT affected.
     """
+    override = (os.environ.get("UNIPUS_DATA_DIR") or "").strip()
+    if override:
+        root = Path(override).expanduser()
+        if not root.is_absolute():
+            raise ValueError("UNIPUS_DATA_DIR must be an absolute app-private directory")
+        return root.resolve()
     if not getattr(sys, "frozen", False):
         return PACKAGE_ROOT.parent
     exe = Path(sys.executable).resolve()

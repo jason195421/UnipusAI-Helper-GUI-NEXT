@@ -1,0 +1,65 @@
+name: Build standalone Android app
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_device_tests:
+        description: 'Run the offline WebView kernel tests on an Android emulator'
+        type: boolean
+        default: false
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '13114758'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Install Android platform
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Verify Python Android adapters
+        run: |
+          python scripts/verify_android_driver.py -v
+          python scripts/verify_android_runtime.py -v
+          python scripts/verify_android_crypto.py -v
+          node scripts/verify_android_kernel.js
+      - name: Build APK and instrumentation tests
+        run: python scripts/build_android.py --test
+      - name: Run offline Android WebView tests
+        if: github.event_name == 'workflow_dispatch' && inputs.run_device_tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: gradle -p android -PpythonExecutable="$(command -v python)" connectedDebugAndroidTest
+      - name: Upload Android test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-reports
+          path: android/app/build/reports/androidTests/
+          if-no-files-found: ignore
+      - name: Upload standalone APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: unipus-helper-android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

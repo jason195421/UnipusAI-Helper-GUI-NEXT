@@ -1,3 +1,4 @@
+import os
 import re
 import time
 from urllib.parse import parse_qs, urlsplit
@@ -51,9 +52,12 @@ def describe_directory_page_state(driver) -> dict:
 def select_course_unit(driver, target, stop_requested=None,
                        timeout: float = 12.0,
                        stable_same_signature_sec: float = 2.5):
-    from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
+    if os.environ.get("UNIPUS_ANDROID") == "1":
+        from .android_selenium import StaleElementReferenceException, TimeoutException, By, WebDriverWait
+    else:
+        from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
 
     if stop_requested is not None and stop_requested.is_set():
         raise TimeoutException('单元切换已停止')

@@ -249,15 +249,23 @@ def _load_runtime_dependencies():
     global InvalidSessionIdException, NoSuchDriverException, NoSuchElementException
     global SessionNotCreatedException, StaleElementReferenceException, TimeoutException
     global WebDriverException, driver_api, quit_driver
-    from selenium.common.exceptions import (InvalidSessionIdException, NoSuchDriverException,
-                                            NoSuchElementException, TimeoutException,
-                                            StaleElementReferenceException,
-                                            SessionNotCreatedException, WebDriverException)
-    from selenium.webdriver.common.action_chains import ActionChains
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.common.keys import Keys
-    from selenium.webdriver.support import expected_conditions as EC
-    from selenium.webdriver.support.ui import WebDriverWait
+    if os.environ.get('UNIPUS_ANDROID') == '1':
+        from unipus_helper.android_selenium import (
+            ActionChains, By, EC, Keys, WebDriverWait,
+            InvalidSessionIdException, NoSuchDriverException, NoSuchElementException,
+            SessionNotCreatedException, StaleElementReferenceException,
+            TimeoutException, WebDriverException,
+        )
+    else:
+        from selenium.common.exceptions import (InvalidSessionIdException, NoSuchDriverException,
+                                                NoSuchElementException, TimeoutException,
+                                                StaleElementReferenceException,
+                                                SessionNotCreatedException, WebDriverException)
+        from selenium.webdriver.common.action_chains import ActionChains
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.common.keys import Keys
+        from selenium.webdriver.support import expected_conditions as EC
+        from selenium.webdriver.support.ui import WebDriverWait
     from unipus_helper.browser import driver_api, quit_driver
 
 
@@ -1060,7 +1068,10 @@ class OpenAICompatibleClient:
         if self.enabled and self._client is None:
             with self._client_lock:
                 if self._client is None:
-                    from openai import OpenAI
+                    if os.environ.get('UNIPUS_ANDROID') == '1':
+                        from unipus_helper.android_openai import OpenAI
+                    else:
+                        from openai import OpenAI
                     self._client = OpenAI(api_key=self.config.api_key, base_url=self.config.base_url)
         return self._client
 
@@ -14101,15 +14112,19 @@ class AISolver:
 
 class UCampusBot:
 
-    def __init__(self, config_path: str = 'config.json', skip_check: bool = False):
+    def __init__(self, config_path: str = 'config.json', skip_check: bool = False,
+                 driver_factory=None):
         self.config = Config.from_json(config_path)
+        if driver_factory is not None and not callable(driver_factory):
+            raise TypeError('driver_factory must be callable')
+        self._driver_factory = driver_factory
         _load_runtime_dependencies()
         self.browser = get_spec(self.config.browser)
         self._shutdown_event = threading.Event()
         self._background_threads = []
         self.driver = None
 
-        if not skip_check:
+        if not skip_check and driver_factory is None:
             self._ensure_environment()
 
         self.driver = self._create_driver()
@@ -14261,6 +14276,8 @@ class UCampusBot:
         return driver
 
     def _create_driver(self):
+        if self._driver_factory is not None:
+            return self._driver_factory()
         temp_dir = ensure_writable_temp_dir()
 
         try:

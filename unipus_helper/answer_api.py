@@ -189,6 +189,9 @@ def read_open_id(driver: Any) -> Optional[str]:
 
 def load_aes():
     """惰性加载 AES，未装依赖时给出可执行的提示。"""
+    if os.environ.get("UNIPUS_ANDROID") == "1":
+        from .android_crypto import AES
+        return AES
     try:
         from Crypto.Cipher import AES  # type: ignore
         return AES
