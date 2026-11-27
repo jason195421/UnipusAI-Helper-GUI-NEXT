@@ -36,6 +36,10 @@ jobs:
         shell: pwsh
         run: python scripts/verify_smoke_test.py
 
+      - name: Verify application console encoding
+        shell: pwsh
+        run: python scripts/verify_app_console_encoding.py
+
       - name: Install UPX
         shell: pwsh
         run: |

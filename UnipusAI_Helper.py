@@ -42,7 +42,7 @@ BASE_DIR = str(PROJECT_ROOT)
 # sys.stdout / sys.stderr / sys.stdin 全部置为 None：此时任何 print()、input()，
 # 或 logging.StreamHandler(None) 都会直接抛异常，程序连设置页都起不来。
 # 必须在任何输出之前把它们换成写文件的安全对象，并标记 GUI_MODE。
-# 源码运行与 debug 构建（console=True）下三个流是真实的，这里完全不介入。
+# 源码运行与 debug 构建（console=True）下保留控制台，但将输出编码统一为 UTF-8。
 # 也可用 UNIPUS_GUI=1 在源码模式下强制模拟，便于本地验证 release 行为。
 GUI_MODE = False
 _GUI_STDIO_STREAM = None
@@ -125,13 +125,23 @@ class _NullInput:
 
 
 def _bootstrap_gui_stdio():
-    """检测无控制台环境并接管标准流；返回是否处于 GUI 模式。"""
+    """配置 UTF-8 控制台，或在无控制台环境接管标准流。"""
     global GUI_MODE, _GUI_STDIO_STREAM
     forced = os.environ.get('UNIPUS_GUI', '').strip().lower() in ('1', 'true', 'yes', 'on')
     headless = bool(getattr(sys, 'frozen', False)) and (
         sys.stdout is None or sys.stderr is None or sys.stdin is None
     )
     if not (forced or headless):
+        # Frozen debug builds may keep cp1252 even when PYTHONUTF8 is set.
+        # Configure streams before logging captures stdout for its handler.
+        for stream in (sys.stdout, sys.stderr):
+            reconfigure = getattr(stream, 'reconfigure', None)
+            if callable(reconfigure):
+                try:
+                    reconfigure(encoding='utf-8', errors='backslashreplace')
+                except (OSError, ValueError):
+                    # Some host-managed streams cannot be reconfigured.
+                    pass
         return False
     GUI_MODE = True
     log_dir = os.path.join(BASE_DIR, 'logs')
