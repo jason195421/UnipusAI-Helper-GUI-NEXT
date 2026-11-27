@@ -2,10 +2,6 @@ import re
 import time
 from urllib.parse import parse_qs, urlsplit
 
-from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-
 from .task_grading import (READ_GRADING_JS, assign_task_records, build_record_index,
                            grading_text, score_text)
 
@@ -55,6 +51,10 @@ def describe_directory_page_state(driver) -> dict:
 def select_course_unit(driver, target, stop_requested=None,
                        timeout: float = 12.0,
                        stable_same_signature_sec: float = 2.5):
+    from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+
     if stop_requested is not None and stop_requested.is_set():
         raise TimeoutException('单元切换已停止')
     state_script = """

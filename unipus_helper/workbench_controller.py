@@ -13,7 +13,6 @@ import urllib.request
 from datetime import datetime
 from types import SimpleNamespace
 
-from .browser import quit_driver as close_browser_driver
 from .course_catalog import CourseCatalogMixin
 from .task_grading import selectable_task
 
@@ -383,6 +382,7 @@ class WorkbenchController(CourseCatalogMixin):
             driver, self.driver = self.driver, None
             def quit_driver():
                 try:
+                    from .browser import quit_driver as close_browser_driver
                     close_browser_driver(driver)
                 except Exception:
                     pass

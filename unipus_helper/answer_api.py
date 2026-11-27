@@ -22,11 +22,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import parse_qs, unquote, urlsplit
 
-try:  # requests 是项目运行环境里的既有依赖，这里只做兜底，避免导入期崩溃
-    import requests
-except Exception:  # pragma: no cover - 仅在缺依赖时触发
-    requests = None  # type: ignore[assignment]
-
 #: 第三方还原出来的 HS256 签名密钥；官方换密钥后这里需要同步更新或改用配置项。
 DEFAULT_SECRET = "a824b379f126b8b7aa5e33dee83fb0a05aa7462c"
 #: 服务端只校验 iss 精确等于该值。
@@ -294,8 +289,10 @@ def is_objective_answers(values: Optional[Sequence[Sequence[str]]]) -> bool:
 def _session(session: Any = None):
     if session is not None:
         return session
-    if requests is None:  # pragma: no cover - 仅在缺依赖时触发
-        raise AnswerApiError("缺少 requests 依赖，无法访问答案接口")
+    try:
+        import requests
+    except ImportError as exc:  # pragma: no cover - 仅在缺依赖时触发
+        raise AnswerApiError("缺少 requests 依赖，无法访问答案接口") from exc
     return requests
 
 

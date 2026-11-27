@@ -212,31 +212,14 @@ def ensure_writable_temp_dir() -> str:
     return ''
 
 
-# 必须先确保临时目录可写，再导入 whisper/torch：
-# 系统 temp 不可写时 torch 的 DLL 初始化会直接抛出 WinError 1114。
-ensure_writable_temp_dir()
-
 from unipus_helper.accuracy_control import (AccuracyController, effective_score_threshold,
                                             parse_target_accuracy)
-from unipus_helper.answer_api import OfficialAnswerProvider
-from unipus_helper.audio_recognizer import AudioTranscriber
-from unipus_helper.browser import DEFAULT_BROWSER, driver_api, get_spec, normalize_browser, quit_driver
-from unipus_helper.environment_checker import EnvironmentChecker
+from unipus_helper.browser import DEFAULT_BROWSER, get_spec, normalize_browser
 from unipus_helper.course_catalog import describe_directory_page_state, select_course_unit
 from unipus_helper.record_skip import (normalize_skip_record_mode,
                                        should_skip_publish_group_fast,
                                        should_skip_record_question)
 from unipus_helper.text_matching import keyword_positions
-from openai import OpenAI
-from selenium.common.exceptions import (InvalidSessionIdException, NoSuchDriverException,
-                                        NoSuchElementException, TimeoutException,
-                                        StaleElementReferenceException,
-                                        SessionNotCreatedException, WebDriverException)
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
 
 gui_log_queue = queue.Queue()
 
@@ -248,6 +231,24 @@ DEFAULT_LOGIN_URL = "https://uai.unipus.cn/sso/index.html?service=https%3A%2F%2F
 UCLOUD_HOME_URL = "https://ucloud.unipus.cn/home"
 
 logger = logging.getLogger('UCampusBot')
+
+
+def _load_runtime_dependencies():
+    """Load browser and scoring dependencies after first-run setup is handled."""
+    global ActionChains, By, EC, Keys, WebDriverWait
+    global InvalidSessionIdException, NoSuchDriverException, NoSuchElementException
+    global SessionNotCreatedException, StaleElementReferenceException, TimeoutException
+    global WebDriverException, driver_api, quit_driver
+    from selenium.common.exceptions import (InvalidSessionIdException, NoSuchDriverException,
+                                            NoSuchElementException, TimeoutException,
+                                            StaleElementReferenceException,
+                                            SessionNotCreatedException, WebDriverException)
+    from selenium.webdriver.common.action_chains import ActionChains
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.support.ui import WebDriverWait
+    from unipus_helper.browser import driver_api, quit_driver
 
 
 def setup_logging():
@@ -927,11 +928,25 @@ class OpenAICompatibleClient:
             and (getattr(config, 'base_url', '') or '').strip()
             and (getattr(config, 'model', '') or '').strip()
         )
-        self.client = OpenAI(api_key=config.api_key, base_url=config.base_url) if self.enabled else None
+        self._client = None
+        self._client_lock = threading.Lock()
         self.conversation_history: List[Dict] = []
         self.material_messages: List[Dict] = []
         self.current_chapter_id: Optional[str] = None
         self.accumulated_passages: set = set()
+
+    @property
+    def client(self):
+        if self.enabled and self._client is None:
+            with self._client_lock:
+                if self._client is None:
+                    from openai import OpenAI
+                    self._client = OpenAI(api_key=self.config.api_key, base_url=self.config.base_url)
+        return self._client
+
+    @client.setter
+    def client(self, value):
+        self._client = value
 
     def start_new_chapter(self, chapter_id: str):
         self.current_chapter_id = chapter_id
@@ -993,7 +1008,7 @@ class OpenAICompatibleClient:
     def ask(self, prompt: str, retry_count: int = 3, stop_requested: Optional[threading.Event] = None,
             screenshot: Optional[bytes] = None, remember: bool = True,
             require_image: bool = False) -> Optional[str]:
-        if not getattr(self, 'enabled', True) or self.client is None:
+        if not getattr(self, 'enabled', True):
             print("    未配置 AI 接口，无法调用大模型作答")
             return None
         if require_image and not screenshot:
@@ -8948,6 +8963,7 @@ class VideoHandler(ContentHandler):
         self.popup_monitor_thread = None
         self.stop_monitoring = threading.Event()
 
+        from unipus_helper.audio_recognizer import AudioTranscriber
         self.transcriber = AudioTranscriber()
 
         ai_ready = bool(
@@ -8955,16 +8971,19 @@ class VideoHandler(ContentHandler):
             and (getattr(config, 'base_url', '') or '').strip()
             and (getattr(config, 'model', '') or '').strip()
         )
-        self.analyzer_client = OpenAI(
-            api_key=config.api_key,
-            base_url=config.base_url
-        ) if ai_ready else None
+        self._analyzer_client = OpenAICompatibleClient(config) if ai_ready else None
 
         self.video_transcript = ""
         self.current_video_url = ""
         self.skip_transcription = False
         self._transcript_lock = threading.Lock()
         self._handling_popup = threading.Event()
+
+    @property
+    def analyzer_client(self):
+        if self._analyzer_client is None:
+            return None
+        return self._analyzer_client.client
 
     def _play_video_and_handle_popups(self, on_transcript: Optional[Callable[[str], None]] = None):
         if self.stop_requested.is_set():
@@ -10026,8 +10045,7 @@ class AISolver:
             getattr(config, 'target_accuracy_min', 100.0),
             getattr(config, 'target_accuracy_max', 100.0),
         )
-        # 官方答案接口：命中则客观题直接用平台真值，未命中/失败一律回落 AI。
-        self.answer_api = OfficialAnswerProvider(config, log=print)
+        self.answer_api = None
 
     def _skip_record_mode(self) -> str:
         config = getattr(self, 'config', None)
@@ -11237,9 +11255,20 @@ class AISolver:
     ANSWER_API_ITEM_KINDS = frozenset({'choice', 'true_false', 'fill', 'dropdown',
                                        'sorting', 'link_match', 'text'})
 
+    def _answer_api_instance(self):
+        provider = getattr(self, 'answer_api', None)
+        if provider is not None:
+            return provider
+        if not getattr(getattr(self, 'config', None), 'answer_api_enabled', True):
+            return None
+        from unipus_helper.answer_api import OfficialAnswerProvider
+        provider = OfficialAnswerProvider(self.config, log=print)
+        self.answer_api = provider
+        return provider
+
     def _answer_api_provider(self):
         """返回可用的答案接口门面；未启用/未命中/已停用时返回 None。"""
-        provider = getattr(self, 'answer_api', None)
+        provider = self._answer_api_instance()
         if provider is None:
             return None
         if not getattr(provider, 'enabled', False) or not getattr(provider, 'active', False):
@@ -11266,7 +11295,7 @@ class AISolver:
 
     def _answer_api_prepare(self, task_label: str = '') -> bool:
         """按当前播放器地址准备答案；失败只记原因，绝不抛异常打断任务。"""
-        provider = getattr(self, 'answer_api', None)
+        provider = self._answer_api_instance()
         if provider is None or not getattr(provider, 'enabled', False):
             return False
         stats = getattr(provider, 'stats', None)
@@ -11478,7 +11507,7 @@ class AISolver:
         self._answer_api_tab_prepared = False
 
     def _answer_api_ensure_prepared(self) -> Optional[Any]:
-        provider = getattr(self, 'answer_api', None)
+        provider = self._answer_api_instance()
         if provider is None or not getattr(provider, 'enabled', False):
             return None
         if not getattr(provider, 'active', False):
@@ -11489,7 +11518,7 @@ class AISolver:
 
     def _answer_api_covers_current_page(self) -> bool:
         """只读预判当前页客观题是否可直接由官方答案接口覆盖（不推进游标、不放弃）。"""
-        provider = getattr(self, 'answer_api', None)
+        provider = self._answer_api_instance()
         if provider is None or not getattr(provider, 'enabled', False) \
                 or getattr(provider, 'abandoned', False):
             return False
@@ -11532,8 +11561,7 @@ class AISolver:
         只有本页真的出现题目时才去请求答案（每个任务最多尝试一次），
         避免纯音视频 / 阅读任务白跑一次接口。
         """
-        provider = getattr(self, 'answer_api', None)
-        if provider is None or not getattr(provider, 'enabled', False) or not questions:
+        if not questions:
             return None
         provider = self._answer_api_ensure_prepared()
         if provider is None:
@@ -11779,10 +11807,7 @@ class AISolver:
 
                 # 官方答案接口命中时跳过 AI，并接入目标正确率控分（以官方答案为基准）
                 official_answers = None
-                api_provider = getattr(self, 'answer_api', None)
-                if api_provider is not None and getattr(api_provider, 'enabled', False) \
-                        and not getattr(api_provider, 'abandoned', False):
-                    official_answers = self._answer_api_page_answers(normal_questions)
+                official_answers = self._answer_api_page_answers(normal_questions)
                 if official_answers is not None:
                     adjusted_official, _ = self._accuracy_controller().apply_to_items(
                         list(zip(normal_questions, official_answers)),
@@ -13843,6 +13868,7 @@ class UCampusBot:
 
     def __init__(self, config_path: str = 'config.json', skip_check: bool = False):
         self.config = Config.from_json(config_path)
+        _load_runtime_dependencies()
         self.browser = get_spec(self.config.browser)
         self._shutdown_event = threading.Event()
         self._background_threads = []
@@ -13855,6 +13881,7 @@ class UCampusBot:
         self.popup_watcher = PopupWatcher(self.driver)
 
     def _ensure_environment(self):
+        from unipus_helper.environment_checker import EnvironmentChecker
         checker = EnvironmentChecker(self.browser.key)
 
         if not checker.check_all():
