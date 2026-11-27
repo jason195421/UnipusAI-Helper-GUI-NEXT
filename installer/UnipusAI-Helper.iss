@@ -4,17 +4,17 @@
 ; All variant-specific values come from /D defines supplied by
 ; scripts/build_variant.py, e.g.:
 ;   ISCC.exe installer\UnipusAI-Helper.iss ^
-;     /DAppVersion=3.9.10 /DBuildMode=release ^
+;     /DAppVersion=3.9.19 /DBuildMode=release ^
 ;     /DMyAppExe=UnipusAI-Helper.exe /DAppDirName=UnipusAI-Helper ^
 ;     /DAppId=B7E4A1C2-3D5F-4A68-9B01-2C3D4E5F6A70 ^
 ;     /DSourceDir=C:\...\dist\UnipusAI-Helper ^
-;     /DSetupBaseName=UnipusAI-Helper-Setup-3.9.10-win-x64-release ^
+;     /DSetupBaseName=UnipusAI-Helper-Setup-3.9.19-win-x64-release ^
 ;     /DOutputDir=C:\...\installer
 ; The #ifndef defaults make the script directly runnable by hand as well.
 ; =====================================================================
 
 #ifndef AppVersion
-  #define AppVersion "3.9.10"
+  #define AppVersion "3.9.19"
 #endif
 #ifndef BuildMode
   #define BuildMode "release"

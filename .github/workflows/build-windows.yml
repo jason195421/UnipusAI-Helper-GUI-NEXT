@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       create_release:
-        description: 'Publish the installers to a GitHub Release for this tag'
+        description: 'Publish the signed installer and portable build to a GitHub Release'
         type: boolean
         default: false
   push:
@@ -15,8 +15,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Windows ${{ matrix.mode }}
+  build-payload:
+    name: Build Windows payload (${{ matrix.mode }})
     runs-on: windows-2022
     strategy:
       fail-fast: false
@@ -32,12 +32,28 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install UPX
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'upx-5.3.1-win64.zip'
+          $url = 'https://github.com/upx/upx/releases/download/v5.3.1/upx-5.3.1-win64.zip'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $expected = '9ff51d1646153b33e8c595b02a4f042fe76be6e7f0abcb752918373ac1f9af04'
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "UPX checksum mismatch: $actual" }
+          $destination = Join-Path $env:RUNNER_TEMP 'upx'
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+          $upx = Get-ChildItem -LiteralPath $destination -Filter upx.exe -Recurse |
+            Select-Object -First 1 -ExpandProperty DirectoryName
+          if (-not $upx) { throw 'upx.exe missing from verified archive' }
+          $upx | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          'UNIPUS_ENABLE_UPX=1' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & (Join-Path $upx 'upx.exe') --version
+
       - name: Install dependencies
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          # Whisper only needs CPU inference; the CPU wheel is far smaller than
-          # the default CUDA-enabled Windows wheel and downloads much faster.
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -r requirements.txt
           python -m pip install "pyinstaller==6.22.3"
@@ -46,74 +62,186 @@ jobs:
         shell: pwsh
         run: |
           python scripts/fetch_ffmpeg.py --platform win32-x64 --registry https://registry.npmjs.org
-          if (-not (Test-Path ffmpeg/win32-x64/ffmpeg.exe)) { throw "ffmpeg.exe missing" }
-          if (-not (Test-Path ffmpeg/win32-x64/ffprobe.exe)) { throw "ffprobe.exe missing" }
+          if (-not (Test-Path ffmpeg/win32-x64/ffmpeg.exe)) { throw 'ffmpeg.exe missing' }
+          if (-not (Test-Path ffmpeg/win32-x64/ffprobe.exe)) { throw 'ffprobe.exe missing' }
 
       - name: Fetch bundled Whisper model (base)
         shell: pwsh
         run: |
           python scripts/fetch_whisper.py
-          if (-not (Test-Path whisper_models/base.pt)) { throw "base.pt missing" }
+          if (-not (Test-Path whisper_models/base.pt)) { throw 'base.pt missing' }
+
+      - name: Build ${{ matrix.mode }} payload
+        shell: pwsh
+        run: python scripts/build_variant.py --mode $env:BUILD_MODE --package-target none
+        env:
+          BUILD_MODE: ${{ matrix.mode }}
+
+      - name: Smoke test compressed payload (offscreen)
+        shell: pwsh
+        run: python scripts/smoke_test.py --mode $env:BUILD_MODE --seconds 12
+        env:
+          BUILD_MODE: ${{ matrix.mode }}
+
+      - name: Upload unsigned payload for packaging jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-payload-${{ matrix.mode }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload runtime logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.mode }}-logs
+          path: dist/**/logs/*.log
+          if-no-files-found: ignore
+
+  portable:
+    name: Package signed portable build (${{ matrix.mode }})
+    needs: build-payload
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [debug, release]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download payload
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-payload-${{ matrix.mode }}
+          path: dist
+
+      - name: Sign and verify program binaries
+        shell: pwsh
+        run: |
+          $folder = if ($env:BUILD_MODE -eq 'debug') { 'UnipusAI-Helper-Debug' } else { 'UnipusAI-Helper' }
+          $certificate = Join-Path "dist/$folder" 'UnipusAI-Helper-CodeSigning.cer'
+          ./scripts/sign_windows.ps1 -Path "dist/$folder" -ExportCertificatePath $certificate -RequireSigning
+        env:
+          BUILD_MODE: ${{ matrix.mode }}
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+
+      - name: Create compressed portable ZIP
+        shell: pwsh
+        run: python scripts/build_variant.py --mode $env:BUILD_MODE --installer-only --package-target portable
+        env:
+          BUILD_MODE: ${{ matrix.mode }}
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable-${{ matrix.mode }}
+          path: installer/*.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  installer:
+    name: Package signed installer (${{ matrix.mode }})
+    needs: build-payload
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [debug, release]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download payload
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-payload-${{ matrix.mode }}
+          path: dist
+
+      - name: Sign and verify program binaries
+        shell: pwsh
+        run: |
+          $folder = if ($env:BUILD_MODE -eq 'debug') { 'UnipusAI-Helper-Debug' } else { 'UnipusAI-Helper' }
+          $certificate = Join-Path "dist/$folder" 'UnipusAI-Helper-CodeSigning.cer'
+          ./scripts/sign_windows.ps1 -Path "dist/$folder" -ExportCertificatePath $certificate -RequireSigning
+        env:
+          BUILD_MODE: ${{ matrix.mode }}
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
 
       - name: Install Inno Setup 6
         shell: pwsh
         run: |
           choco install innosetup --no-progress -y
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) {
-            # Portable fallback: the installer can unpack ISCC.exe without admin rights.
-            $url = "https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe"
-            $exe = Join-Path $env:RUNNER_TEMP "innosetup.exe"
-            $ok = $false
-            for ($i = 0; $i -lt 4 -and -not $ok; $i++) {
-              try {
-                Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
-                if ((Get-Item $exe).Length -gt 1MB) { $ok = $true }
-              } catch { Start-Sleep -Seconds 3 }
-            }
-            if (-not $ok) { throw "Could not download Inno Setup portable installer" }
-            $dir = Join-Path $env:RUNNER_TEMP "inno6"
-            Start-Process -FilePath $exe -ArgumentList @("/SP-","/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/NOCANCEL","/PORTABLE=1","/DIR=$dir") -Wait
-            $iscc = Join-Path $dir "ISCC.exe"
-          }
-          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found" }
+          if (-not (Test-Path $iscc)) { throw 'ISCC.exe not found' }
           "UNIPUS_ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "ISCC ready: $iscc"
 
-      - name: Build ${{ matrix.mode }} variant
+      - name: Create installer
+        shell: pwsh
+        run: python scripts/build_variant.py --mode $env:BUILD_MODE --installer-only --package-target installer
+        env:
+          BUILD_MODE: ${{ matrix.mode }}
+
+      - name: Sign and verify installer
         shell: pwsh
         run: |
-          python scripts/build_variant.py --mode ${{ matrix.mode }}
+          $setup = Get-ChildItem -Path installer -Filter "*Setup*win-x64-$($env:BUILD_MODE).exe" |
+            Select-Object -First 1
+          if (-not $setup) { throw 'Setup.exe missing before signing' }
+          ./scripts/sign_windows.ps1 -Path $setup.FullName -RequireSigning
+        env:
+          BUILD_MODE: ${{ matrix.mode }}
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
 
-      - name: Smoke test (offscreen, non-fatal)
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          python scripts/smoke_test.py --mode ${{ matrix.mode }} --seconds 12
-
-      - name: Upload runtime logs
-        if: always()
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: UnipusAI-Helper-Windows-${{ matrix.mode }}-logs
-          path: dist/**/logs/*.log
-          if-no-files-found: ignore
-
-      - name: Upload installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: UnipusAI-Helper-Windows-${{ matrix.mode }}
-          path: |
-            installer/*.exe
-            installer/*.zip
-            docs/发布说明_Windows.txt
+          name: windows-installer-${{ matrix.mode }}
+          path: installer/*Setup*win-x64-${{ matrix.mode }}.exe
           if-no-files-found: error
+          compression-level: 0
 
-      - name: Publish to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || inputs.create_release
+  publish:
+    name: Publish Windows packages
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.create_release
+    needs: [portable, installer]
+    runs-on: windows-2022
+    steps:
+      - name: Download portable packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: windows-portable-*
+          path: release-assets/portable
+          merge-multiple: true
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: windows-installer-*
+          path: release-assets/installer
+          merge-multiple: true
+
+      - name: Publish signed Windows packages
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            installer/*.exe
-            installer/*.zip
+            release-assets/portable/*.zip
+            release-assets/installer/*.exe
           fail_on_unmatched_files: true

@@ -29,8 +29,10 @@
 - **平台自适应界面**：Windows 采用 WinUI 3 / Fluent 风格（Mica 渐变、圆角、系统强调色、浅/深色跟随系统），macOS 采用原生 Aqua 风格，一套 Qt Quick 界面按平台自动切换。
 - **内置 FFmpeg**：语音识别所需的 `ffmpeg` / `ffprobe` 随程序打包，启动时自动加入 PATH，无需联网下载或手工安装。
 - **双版本构建**：每个平台都提供 **release**（纯 GUI、无终端窗口）与 **debug**（保留控制台输出便于排错）两种构建，由 `UNIPUS_BUILD_MODE` 一键切换；release 版启动时自动把标准输出/错误重定向到日志文件，致命错误改为系统弹窗。
-- **安装包发布**：Windows 用 Inno Setup 生成 `Setup.exe`（用户级安装到 `%LOCALAPPDATA%`，无需管理员）并附便携 zip；macOS 用 `hdiutil` 生成 `.dmg`（release 为可拖入「应用程序」的 `.app`，debug 附带 `Run-Debug.command`）。
-- **双平台自动构建**：`.github/workflows/build-windows.yml` 与 `build-macos.yml` 在 `windows-2022` / `macos-15`（arm64）/ `macos-15-intel`（x64）上按 debug × release 矩阵构建，打 `v*` 标签时发布到 GitHub Release；macOS 配置与日志写入 `~/Library/Application Support/UnipusAI-Helper/`，保持应用包只读。
+- **安装包发布**：Windows 分开构建 Inno Setup 安装版与便携版；便携 ZIP 使用最高 Deflate 压缩，PyInstaller 可执行文件使用经 SHA-256 校验的 UPX 压缩；macOS 用 `hdiutil` 生成 `.dmg`（release 为可拖入「应用程序」的 `.app`，debug 附带 `Run-Debug.command`）。
+- **Windows 程序签名**：便携版内的 EXE / DLL / PYD 和安装程序使用 Authenticode 签名并在 CI 中验证。签名可验证发布者和文件完整性，不加密 Python 源码；修改已签名文件会使签名验证失败。
+- **Windows 签名配置**：GitHub Actions 需要代码签名 PFX 证书和密码；配置方式见 [Windows CI 签名说明](docs/windows-signing.md)。
+- **双平台自动构建**：`.github/workflows/build-windows.yml` 将 Windows payload、便携版与安装版分开为独立 job；`build-macos.yml` 在 `macos-15`（arm64）/ `macos-15-intel`（x64）上按 debug × release 矩阵构建，打 `v*` 标签时发布到 GitHub Release。Windows 签名 job 需要在仓库 Actions secrets 配置 `WINDOWS_SIGNING_CERTIFICATE_BASE64`（PFX 证书文件的 Base64）和 `WINDOWS_SIGNING_PFX_PASSWORD`；macOS 配置与日志写入 `~/Library/Application Support/UnipusAI-Helper/`，保持应用包只读。
 
 ---
 
@@ -76,7 +78,7 @@ UnipusAI-Helper/
 前往 [Releases](https://github.com/jason195421/UnipusAI-Helper/releases) 下载对应版本：
 
 - Windows：`UnipusAI-Helper-Setup-<版本>-win-x64-<mode>.exe`（安装到 `%LOCALAPPDATA%\UnipusAI-Helper`，
-  带开始菜单/桌面快捷方式），或 `UnipusAI-Helper-<版本>-win-x64-<mode>.zip` 便携解压即用。
+  带开始菜单/桌面快捷方式），或 `UnipusAI-Helper-<版本>-win-x64-<mode>.zip` 便携解压即用。两种产物分别构建和发布，程序文件带 Authenticode 签名。
 - macOS：`UnipusAI-Helper-macOS-<arch>-<mode>.dmg`，详见下方「macOS」一节。
 
 `<mode>` 为 `release`（推荐，纯 GUI 无终端）或 `debug`（保留控制台日志）；

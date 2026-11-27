@@ -195,7 +195,7 @@ def windows_installer(mode, payload, iscc):
 def portable_zip(mode, payload):
     INSTALLER_DIR.mkdir(parents=True, exist_ok=True)
     out = INSTALLER_DIR / ("UnipusAI-Helper-%s-win-x64-%s.zip" % (APP_VERSION, mode))
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
         for p in sorted(payload.rglob("*")):
             if p.is_file():
                 zf.write(p, p.relative_to(payload.parent))
@@ -250,9 +250,12 @@ def main():
     ap.add_argument("--mode", choices=["debug", "release"], required=True)
     ap.add_argument("--iscc", default=None)
     ap.add_argument("--skip-installer", action="store_true")
+    ap.add_argument("--package-target", choices=["all", "portable", "installer", "none"],
+                    default="all", help="select which Windows package to produce")
     ap.add_argument("--installer-only", action="store_true",
                     help="reuse an existing dist/ payload; skip PyInstaller, only package")
     args = ap.parse_args()
+    package_target = "none" if args.skip_installer else args.package_target
 
     if args.mode == "debug":
         log("DEBUG build: console/terminal kept, name suffix -Debug")
@@ -266,17 +269,22 @@ def main():
     verify_payload(args.mode, payload)
 
     outputs = []
-    if not args.skip_installer:
+    if package_target != "none":
         if sys.platform == "win32":
-            iscc = find_iscc(args.iscc)
-            if iscc is None:
-                log("WARNING: ISCC.exe not found - skipping the setup installer. "
-                    "Install Inno Setup 6 or pass --iscc / UNIPUS_ISCC.")
-            else:
-                outputs.append(windows_installer(args.mode, payload, iscc))
-            outputs.append(portable_zip(args.mode, payload))
+            if package_target in ("all", "installer"):
+                iscc = find_iscc(args.iscc)
+                if iscc is None:
+                    log("WARNING: ISCC.exe not found - skipping the setup installer. "
+                        "Install Inno Setup 6 or pass --iscc / UNIPUS_ISCC.")
+                else:
+                    outputs.append(windows_installer(args.mode, payload, iscc))
+            if package_target in ("all", "portable"):
+                outputs.append(portable_zip(args.mode, payload))
         elif sys.platform == "darwin":
-            outputs.append(macos_dmg(args.mode, payload))
+            if package_target in ("all", "installer"):
+                outputs.append(macos_dmg(args.mode, payload))
+            elif package_target == "portable":
+                raise SystemExit("[build] ERROR: portable packages are Windows-only")
         else:
             log("WARNING: no installer toolchain here; payload left in dist/.")
 

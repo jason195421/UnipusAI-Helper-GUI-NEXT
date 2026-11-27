@@ -20,6 +20,7 @@ single source of truth for debug vs release behaviour.
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import os
 import platform as _platform
+import shutil
 import sys as _sys
 
 APP_VERSION = "3.9.19"
@@ -29,6 +30,7 @@ if BUILD_MODE not in ("debug", "release"):
     BUILD_MODE = "release"
 IS_DEBUG = BUILD_MODE == "debug"
 IS_MAC = _sys.platform == "darwin"
+USE_UPX = _sys.platform == "win32" and os.environ.get("UNIPUS_ENABLE_UPX") == "1" and bool(shutil.which("upx"))
 SUFFIX = "-Debug" if IS_DEBUG else ""
 
 # A console=True macOS .app bundle writes LSBackgroundOnly into Info.plist,
@@ -45,8 +47,8 @@ APP_NAME = "UnipusAI-Helper" + SUFFIX + ".app"
 RUNTIME_HOOKS = [] if IS_DEBUG else ["scripts/gui_runtime_hook.py"]
 
 print("[spec] BUILD_MODE=%s IS_DEBUG=%s IS_MAC=%s CONSOLE=%s "
-      "MAKE_APP_BUNDLE=%s EXE_NAME=%s" % (
-          BUILD_MODE, IS_DEBUG, IS_MAC, CONSOLE, MAKE_APP_BUNDLE, EXE_NAME))
+      "MAKE_APP_BUNDLE=%s EXE_NAME=%s USE_UPX=%s" % (
+          BUILD_MODE, IS_DEBUG, IS_MAC, CONSOLE, MAKE_APP_BUNDLE, EXE_NAME, USE_UPX))
 
 
 def _ffmpeg_platform_id():
@@ -125,7 +127,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,
+    upx=USE_UPX,
     console=CONSOLE,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -138,8 +140,8 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=False,
-    upx_exclude=[],
+    upx=USE_UPX,
+    upx_exclude=["*.pyd", "Qt*.dll"],
     name=COLLECT_NAME,
 )
 

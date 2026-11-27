@@ -1,11 +1,12 @@
-UnipusAI-Helper v3.9.10 — Windows 安装版 / 便携版
+UnipusAI-Helper v3.9.19 — Windows 安装版 / 便携版
 ==================================================
 
 本版本在 v3.9.9（内置 FFmpeg / WinUI 3 自适应界面）基础上新增：
   * release / debug 两种构建，由 UNIPUS_BUILD_MODE 环境变量切换；
   * release 为纯 GUI 启动，不显示终端窗口（推荐日常使用）；
   * debug 保留控制台窗口输出运行日志，便于排错（exe 名带 -Debug 后缀）；
-  * 提供 Inno Setup 安装包（Setup.exe）与便携 zip 两种分发形式；
+  * 安装版与便携版分别由独立 GitHub Actions job 打包；
+  * Windows PE 程序文件带 Authenticode 签名，便携 ZIP 使用最高 Deflate 压缩；
   * macOS 同步提供 .dmg 安装包（arm64 / x64 × release / debug）。
   * 安装向导全面中文化，欢迎页显示「欢迎安装 UnipusAI-Helper-NEXT」，
     并采用 WinUI 3 / Fluent 风格（Segoe UI 字体、Mica 浅色背景、蓝色强调
@@ -23,11 +24,11 @@ UnipusAI-Helper v3.9.10 — Windows 安装版 / 便携版
 
 安装方式
 --------
-  1) 安装包（推荐）：双击 UnipusAI-Helper-Setup-3.9.10-win-x64-<mode>.exe，
+  1) 安装包（推荐）：双击 UnipusAI-Helper-Setup-3.9.19-win-x64-<mode>.exe，
      默认安装到 %LOCALAPPDATA%\UnipusAI-Helper（用户级，无需管理员权限；
      目录可写，config.json 与 logs/ 就放在程序目录里），并创建开始菜单与可选
      桌面快捷方式；卸载到「设置 → 应用 → 安装的应用」中操作。
-  2) 便携版：把 UnipusAI-Helper-3.9.10-win-x64-<mode>.zip 解压到任意可写目录，
+  2) 便携版：把 UnipusAI-Helper-3.9.19-win-x64-<mode>.zip 解压到任意可写目录，
      直接双击其中的 exe 即可，无需安装、无需管理员权限。
   <mode> 为 release 或 debug；两种版本使用不同的 AppId，可并存安装。
 
@@ -89,7 +90,8 @@ UnipusAI-Helper v3.9.10 — Windows 安装版 / 便携版
 构建与验证
 ----------
   * 使用 PyInstaller 6.22.3 / Python 3.12 打包，同一份 UnipusAI-Helper.spec
-    由 UNIPUS_BUILD_MODE=debug|release 生成两种版本（console 开关随版本切换）。
+    由 UNIPUS_BUILD_MODE=debug|release 生成两种版本（console 开关随版本切换）；
+    Windows 构建以 SHA-256 校验固定版本的 UPX 后压缩 exe 和兼容 DLL。
   * 安装向导资源位于 installer/：ChineseSimplified.isl（简体中文语言文件，
     UTF-8 BOM）、WizardImage.bmp / WizardSmallImage.bmp（WinUI 3 风格插图）、
     UnipusAI-Helper.ico（安装包图标）；.iss 的 [Code] 段在 InitializeWizard 里
@@ -98,15 +100,21 @@ UnipusAI-Helper v3.9.10 — Windows 安装版 / 便携版
       .venv\Scripts\python.exe scripts/fetch_ffmpeg.py --platform win32-x64
      再准备内置 Whisper 权重（复用本机 ~/.cache/whisper 或从官方镜像下载并校验）：
        .venv\Scripts\python.exe scripts/fetch_whisper.py
-    一键构建（组装 payload、校验结构、调用 ISCC.exe 出安装包并打便携 zip）：
+    分别构建 payload、便携版和安装版：
       .venv\Scripts\python.exe scripts/build_variant.py --mode release
       .venv\Scripts\python.exe scripts/build_variant.py --mode debug
+      .venv\Scripts\python.exe scripts/build_variant.py --mode release --installer-only --package-target portable
+      .venv\Scripts\python.exe scripts/build_variant.py --mode release --installer-only --package-target installer
     冒烟测试：.venv\Scripts\python.exe scripts/smoke_test.py --mode release
   * 已验证：两种版本均可 offscreen 启动、QML 设置页正常加载、release 无终端且
     标准输出重定向到日志、内置 FFmpeg 命中 PATH、内置 Whisper base.pt 随
     payload 发布且离线 load_model 直命中本地文件、安装包与便携 zip 结构完整。
-  * GitHub Actions：.github/workflows/build-windows.yml 在 windows-2022 上按
-    debug/release 矩阵构建并发布；打 v* 标签时自动上传 Setup.exe 与便携 zip。
+  * Windows 便携 ZIP 使用 Deflate level 9；安装包使用 Inno Setup LZMA2 固实压缩。
+    两类产物由独立 GitHub Actions job 构建并分别发布，避免安装版与便携版耦合。
+  * GitHub Actions：.github/workflows/build-windows.yml 分开执行 payload、便携版和安装版 jobs；
+    打 v* 标签发布时必须配置 WINDOWS_SIGNING_CERTIFICATE_BASE64 与 WINDOWS_SIGNING_PFX_PASSWORD。
+    Authenticode 签名并验证便携版 exe / dll / pyd 与安装程序；签名用于检查发布来源和二进制完整性，
+    不会加密 Python 源码或普通资源文件。证书设置方法见 docs/windows-signing.md。
   * 本机若出现 Selenium Manager 联网失败（无法获取 msedgedriver），
     属于运行环境网络问题，不是 exe 打包问题；按上节使用缓存驱动即可。
 
