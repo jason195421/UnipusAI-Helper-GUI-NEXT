@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib.machinery
 import os
 import shutil
 import subprocess
@@ -76,6 +77,26 @@ def build_pyinstaller(mode):
     env.setdefault("PYTHONUTF8", "1")
     run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
          "UnipusAI-Helper.spec"], env=env)
+
+
+def build_native_extension():
+    extension_suffixes = importlib.machinery.EXTENSION_SUFFIXES
+    existing_extensions = [
+        artifact for artifact in (ROOT / "unipus_helper").glob("_textmatch*")
+        if any(artifact.name.endswith(suffix) for suffix in extension_suffixes)
+    ]
+    try:
+        run([sys.executable, "setup_native.py", "build_ext", "--inplace"])
+    except (OSError, subprocess.CalledProcessError) as exc:
+        if existing_extensions:
+            raise SystemExit(
+                "[build] ERROR: C++ matcher compilation failed while an existing native "
+                "extension is present; remove or rebuild it before packaging."
+            ) from exc
+        log("WARNING: C++ matcher unavailable; using Python fallback (%s)" % exc)
+        return False
+    run([sys.executable, "scripts/verify_textmatch.py", "--require-native"])
+    return True
 
 
 def assemble_payload(mode):
@@ -239,6 +260,7 @@ def main():
         log("RELEASE build: windowed GUI, no terminal")
 
     if not args.installer_only:
+        build_native_extension()
         build_pyinstaller(args.mode)
     payload = assemble_payload(args.mode)
     verify_payload(args.mode, payload)

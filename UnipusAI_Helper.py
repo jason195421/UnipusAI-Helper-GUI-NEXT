@@ -226,6 +226,7 @@ from unipus_helper.course_catalog import describe_directory_page_state, select_c
 from unipus_helper.record_skip import (normalize_skip_record_mode,
                                        should_skip_publish_group_fast,
                                        should_skip_record_question)
+from unipus_helper.text_matching import keyword_positions
 from openai import OpenAI
 from selenium.common.exceptions import (InvalidSessionIdException, NoSuchDriverException,
                                         NoSuchElementException, TimeoutException,
@@ -11206,29 +11207,12 @@ class AISolver:
         return corrected
 
     def _keyword_positions(self, corpus: str, q: Question, order: List[str]) -> Dict[str, int]:
-        sentences = [s for s in re.split(r'(?<=[.!?])\s+', corpus) if s.strip()]
-        if not sentences:
-            return {}
-        stop = {'the', 'and', 'that', 'with', 'from', 'this', 'have', 'were', 'their',
-                'they', 'into', 'such', 'when', 'what', 'which', 'been', 'also', 'more',
-                'some', 'many', 'other', 'after', 'before', 'over', 'than', 'them'}
-        result = {}
+        option_texts = []
         for letter in order:
             opt = next((o for o in q.options if o.letter == letter), None)
-            words = {w for w in self._normalize_for_match(opt.text if opt else '').split()
-                     if len(w) > 2 and w not in stop}
-            if len(words) < 2:
-                return {}
-            best_idx, best_score = -1, 0.0
-            for idx, sentence in enumerate(sentences):
-                overlap = len(words & set(sentence.split()))
-                score = overlap / len(words)
-                if score > best_score:
-                    best_idx, best_score = idx, score
-            if best_idx < 0 or best_score < 0.34:
-                return {}
-            result[letter] = best_idx
-        return result
+            option_texts.append(self._normalize_for_match(opt.text if opt else ''))
+        positions = keyword_positions(corpus, option_texts)
+        return dict(zip(order, positions)) if positions is not None else {}
 
     # ------------------------------------------------------------------ #
     # 官方答案接口（客观题真值）

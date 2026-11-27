@@ -1,6 +1,9 @@
 logs/
 __pycache__/
 *.pyc
+*.pyd
+*.so
+*.dylib
 .idea/
 .venv/
 net10.0-windows/
