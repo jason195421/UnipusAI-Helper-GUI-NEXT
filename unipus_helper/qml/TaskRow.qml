@@ -17,6 +17,8 @@ Item {
     required property string scoreText
     required property bool scoreAbnormal
     property bool editable: true
+    property bool motionReady: false
+    Component.onCompleted: motionReady = true
     height: sectionHeader ? 88 : 52
 
     function toggleSelection(keyboard) {
@@ -88,10 +90,12 @@ Item {
             color: taskControl.down && row.selectable ? Theme.selectionHover : row.chosen ? (taskControl.hovered ? Theme.selectionHover : Theme.selection) : taskControl.hovered ? Theme.raised : "transparent"
             border.width: taskControl.visualFocus ? 1 : 0
             border.color: Theme.accent
+            Behavior on color { enabled: row.motionReady && Theme.motionEnabled; ColorAnimation { duration: Theme.motionFast } }
             Rectangle {
                 x: 7; anchors.verticalCenter: parent.verticalCenter
                 width: 3; height: 22; radius: 2
-                color: Theme.accent; visible: row.chosen
+                color: Theme.accent; opacity: row.chosen ? 1 : 0
+                Behavior on opacity { enabled: row.motionReady && Theme.motionEnabled; NumberAnimation { duration: Theme.motionFast } }
             }
         }
         HoverHandler { enabled: row.editable; cursorShape: row.selectable ? Qt.PointingHandCursor : Qt.ForbiddenCursor }

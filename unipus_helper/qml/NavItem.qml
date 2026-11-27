@@ -16,11 +16,13 @@ Button {
         color: control.selected ? Theme.navigation : control.hovered ? Theme.hover : "transparent"
         border.width: control.activeFocus ? 1 : 0
         border.color: control.activeFocus ? Theme.accent : Theme.line
-        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on color { enabled: Theme.motionEnabled; ColorAnimation { duration: Theme.motionFast } }
         Rectangle {
             anchors.verticalCenter: parent.verticalCenter
-            x: 6; width: 3; height: 18; radius: 2
-            color: Theme.accent; visible: control.selected
+            x: 6; width: 3; height: control.selected ? 18 : 8; radius: 2
+            color: Theme.accent; opacity: control.selected ? 1 : 0
+            Behavior on opacity { enabled: Theme.motionEnabled; NumberAnimation { duration: Theme.motionFast } }
+            Behavior on height { enabled: Theme.motionEnabled; NumberAnimation { duration: Theme.motionNormal; easing.type: Easing.OutCubic } }
         }
     }
     contentItem: RowLayout {

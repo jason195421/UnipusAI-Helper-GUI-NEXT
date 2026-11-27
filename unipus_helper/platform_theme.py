@@ -9,6 +9,8 @@ One QML codebase serves three looks:
 The chosen palette is exposed to QML as a registered singleton
 (import UnipusAI.Platform 1.0).  Values are resolved once at startup;
 set UNIPUS_THEME=dark|light (or UNIPUS_ACCENT=#rrggbb) to override.
+Motion follows Qt's accessibility hints when available; set
+UNIPUS_REDUCED_MOTION=1 to disable nonessential animation on any Qt version.
 """
 from __future__ import annotations
 
@@ -16,8 +18,8 @@ import os
 import subprocess
 import sys
 
-from PySide6.QtCore import Property, QObject, Qt
-from PySide6.QtGui import QColor, QFontDatabase
+from PySide6.QtCore import Property, QObject, Qt, Signal
+from PySide6.QtGui import QColor, QFontDatabase, QGuiApplication
 from PySide6.QtQml import qmlRegisterSingletonInstance
 
 URI = "UnipusAI.Platform"
@@ -114,12 +116,14 @@ def ui_font_family() -> str:
 
 
 class PlatformInfo(QObject):
-    """QML-facing, immutable description of the host platform.
+    """QML-facing platform description, with live accessibility preferences.
 
     PySide6 6.12 requires the @Property decorator form on a QObject subclass;
     assigning Property(...) as a class attribute silently yields false/empty
     values inside QML singletons.
     """
+
+    reducedMotionChanged = Signal()
 
     def __init__(self, dark: bool | None = None, accent: str | None = None,
                  parent=None):
@@ -128,6 +132,35 @@ class PlatformInfo(QObject):
         self._accent = (accent or os.environ.get("UNIPUS_ACCENT") or
                         default_accent(self._dark))
         self._family = ui_font_family()
+        self._force_reduced_motion = os.environ.get(
+            "UNIPUS_REDUCED_MOTION", ""
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self._motion_source = None
+        # Accessibility hints are newer than our minimum supported Qt version.
+        app = QGuiApplication.instance()
+        accessibility = getattr(app.styleHints(), "accessibility", None) if app else None
+        if callable(accessibility):
+            try:
+                self._motion_source = accessibility()
+                changed = getattr(self._motion_source, "motionPreferenceChanged", None)
+                if changed is not None:
+                    changed.connect(self._motion_preference_changed)
+            except (AttributeError, RuntimeError, TypeError):
+                self._motion_source = None
+
+    def _motion_preference_changed(self, *_):
+        self.reducedMotionChanged.emit()
+
+    @Property(bool, notify=reducedMotionChanged)
+    def reducedMotion(self):
+        if self._force_reduced_motion:
+            return True
+        reduced = getattr(getattr(Qt, "MotionPreference", None), "ReducedMotion", None)
+        preference = getattr(self._motion_source, "motionPreference", None)
+        try:
+            return reduced is not None and callable(preference) and preference() == reduced
+        except RuntimeError:
+            return False
 
     @Property(bool, constant=True)
     def isWindows(self):

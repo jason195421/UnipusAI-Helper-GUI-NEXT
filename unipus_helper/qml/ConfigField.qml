@@ -25,7 +25,7 @@ TextField {
         color: fieldControl.activeFocus ? Theme.surface : Theme.field
         border.width: fieldControl.activeFocus ? 2 : 1
         border.color: fieldControl.activeFocus ? Theme.accent : fieldControl.hovered ? Theme.muted : Theme.line
-        Behavior on color { ColorAnimation { duration: 120 } }
-        Behavior on border.color { ColorAnimation { duration: 120 } }
+        Behavior on color { enabled: Theme.motionEnabled; ColorAnimation { duration: Theme.motionFast } }
+        Behavior on border.color { enabled: Theme.motionEnabled; ColorAnimation { duration: Theme.motionFast } }
     }
 }

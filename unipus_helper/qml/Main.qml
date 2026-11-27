@@ -36,6 +36,28 @@ ApplicationWindow {
     readonly property var summary: workbench.summary
     readonly property bool busy: !!appState.busy
     property bool returnToTasksWhenIdle: false
+    property bool pageMotionReady: false
+    Component.onCompleted: pageMotionReady = true
+    onCurrentPageChanged: {
+        if (pageMotionReady && Theme.motionEnabled) pageReveal.restart()
+    }
+
+    // Animate a rendering transform, never the geometry owned by RowLayout.
+    ParallelAnimation {
+        id: pageReveal; objectName: "pageReveal"
+        NumberAnimation { target: pageContent; property: "opacity"; from: 0.3; to: 1; duration: Theme.motionNormal; easing.type: Easing.OutCubic }
+        NumberAnimation { target: pageOffset; property: "y"; from: 6; to: 0; duration: Theme.motionNormal; easing.type: Easing.OutCubic }
+    }
+    Connections {
+        target: Theme
+        function onMotionEnabledChanged() {
+            if (window.pageMotionReady && !Theme.motionEnabled) {
+                pageReveal.stop()
+                pageContent.opacity = 1
+                pageOffset.y = 0
+            }
+        }
+    }
 
     function finishProcessingNavigation() {
         if (window.setupMode) return
@@ -123,6 +145,7 @@ ApplicationWindow {
                         background: Rectangle {
                             radius: Theme.radiusSm; color: unitButton.selected ? Theme.navigation : unitButton.hovered ? Theme.hover : "transparent"
                             border.width: unitButton.activeFocus ? 1 : 0; border.color: Theme.accent
+                            Behavior on color { enabled: Theme.motionEnabled; ColorAnimation { duration: Theme.motionFast } }
                         }
                         contentItem: ColumnLayout {
                             spacing: 6
@@ -172,8 +195,10 @@ ApplicationWindow {
         }
 
         ColumnLayout {
+            id: pageContent; objectName: "pageContent"
             Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumWidth: 0; Layout.minimumHeight: 0
             Layout.leftMargin: window.pageMargin; Layout.rightMargin: window.pageMargin; spacing: 0
+            transform: Translate { id: pageOffset; objectName: "pageOffset" }
             RowLayout {
                 Layout.fillWidth: true; Layout.preferredHeight: window.compactHeight ? 64 : 72
                 Layout.topMargin: window.compactHeight ? 16 : 24; Layout.bottomMargin: window.compactHeight ? 16 : 20; spacing: 24
@@ -264,7 +289,11 @@ ApplicationWindow {
                                         onClicked: { workbench.chooseFilter(modelData.key); window.resetTaskPosition() }
                                         HoverHandler { cursorShape: Qt.PointingHandCursor }
                                         Accessible.name: modelData.title
-                                        background: Rectangle { radius: Theme.radiusSm; color: filterButton.selected ? Theme.navigation : filterButton.hovered ? Theme.hover : "transparent"; border.width: filterButton.selected || filterButton.activeFocus ? 1 : 0; border.color: filterButton.activeFocus ? Theme.accent : Theme.selectionLine }
+                                        background: Rectangle {
+                                            radius: Theme.radiusSm; color: filterButton.selected ? Theme.navigation : filterButton.hovered ? Theme.hover : "transparent"
+                                            border.width: filterButton.selected || filterButton.activeFocus ? 1 : 0; border.color: filterButton.activeFocus ? Theme.accent : Theme.selectionLine
+                                            Behavior on color { enabled: Theme.motionEnabled; ColorAnimation { duration: Theme.motionFast } }
+                                        }
                                         contentItem: UiText { id: filterText; text: filterButton.modelData.title + "  " + summary.counts[filterButton.modelData.key]; font.pixelSize: 13; font.weight: filterButton.selected ? Font.DemiBold : Font.Medium; color: filterButton.modelData.key === "required" ? Theme.compulsory : filterButton.selected ? Theme.ink : Theme.secondary; horizontalAlignment: Text.AlignHCenter }
                                     }
                                 }
@@ -407,6 +436,15 @@ ApplicationWindow {
         closePolicy: Popup.CloseOnEscape
         onOpened: cancelQuick.forceActiveFocus()
         anchors.centerIn: parent; width: 456; padding: 24
+        enter: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.motionNormal; easing.type: Easing.OutCubic }
+                NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: Theme.motionNormal; easing.type: Easing.OutCubic }
+            }
+        }
+        exit: Transition {
+            NumberAnimation { property: "opacity"; to: 0; duration: Theme.motionFast }
+        }
         header: UiText { text: "处理当前页"; font.pixelSize: 20; font.weight: Font.Medium; padding: 24; bottomPadding: 8 }
         onAccepted: window.startProcessing("quick")
         background: Rectangle { color: Theme.surface; radius: Theme.radiusLg; border.color: Theme.line }

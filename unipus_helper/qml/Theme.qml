@@ -13,6 +13,10 @@ QtObject {
     readonly property bool macos: PlatformInfo.isMacOS
     readonly property string themeId: PlatformInfo.themeId
     readonly property string fontFamily: PlatformInfo.family !== "" ? PlatformInfo.family : Qt.application.font.family
+    readonly property bool motionEnabled: !PlatformInfo.reducedMotion
+    readonly property int motionFast: motionEnabled ? 110 : 0
+    readonly property int motionNormal: motionEnabled ? 180 : 0
+    readonly property int motionProgress: motionEnabled ? 260 : 0
 
     // Accent follows the OS (Windows DWM / macOS system blue); UNIPUS_ACCENT overrides.
     readonly property color accent: PlatformInfo.accent

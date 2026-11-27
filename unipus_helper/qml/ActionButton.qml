@@ -16,6 +16,9 @@ Button {
     rightPadding: 14
     hoverEnabled: true
     opacity: enabled ? 1 : 0.45
+    scale: down ? 0.97 : 1
+    Behavior on scale { enabled: Theme.motionEnabled; NumberAnimation { duration: Theme.motionFast; easing.type: Easing.OutCubic } }
+    Behavior on opacity { enabled: Theme.motionEnabled; NumberAnimation { duration: Theme.motionFast } }
     font.pixelSize: 13
     background: Rectangle {
         radius: Theme.radiusSm
@@ -24,7 +27,7 @@ Button {
              : control.quiet ? "transparent" : Theme.surface
         border.width: control.primary || control.quiet ? 0 : 1
         border.color: control.activeFocus ? Theme.accent : Theme.line
-        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on color { enabled: Theme.motionEnabled; ColorAnimation { duration: Theme.motionFast } }
         Rectangle {
             anchors.fill: parent
             anchors.margins: -2
