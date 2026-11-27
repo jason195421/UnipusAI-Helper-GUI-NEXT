@@ -9,6 +9,7 @@ import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.net.Uri;
 import android.net.http.SslError;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -16,6 +17,7 @@ import android.util.Base64;
 import android.view.PixelCopy;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
 import android.webkit.RenderProcessGoneDetail;
@@ -75,6 +77,7 @@ public final class BrowserKernel {
     private final Map<String, Tab> tabs = new LinkedHashMap<>();
     private final Map<String, Pending> pending = new LinkedHashMap<>();
     private final Map<String, Evaluation> evaluations = new LinkedHashMap<>();
+    private final Map<String, ScreenshotWait> screenshotWaits = new LinkedHashMap<>();
     private final List<String> documentScripts = new ArrayList<>();
     private final String bootstrap;
     private final boolean bridgeSupported;
@@ -580,6 +583,21 @@ public final class BrowserKernel {
             finishError(call, "WebDriverException", "Switch to the window before taking a screenshot");
             return;
         }
+        if (!tab.view.isShown()) {
+            captureScreenshot(call, tab);
+            return;
+        }
+        ScreenshotWait wait = new ScreenshotWait(call, tab);
+        screenshotWaits.put(call.id, wait);
+        wait.start();
+    }
+
+    private void captureScreenshot(Pending call, Tab tab) {
+        if (call.finished || tab.closed) return;
+        if (!tab.id.equals(currentWindow)) {
+            finishError(call, "WebDriverException", "Browser window changed before the screenshot");
+            return;
+        }
         int width = tab.view.getWidth(), height = tab.view.getHeight();
         if (width <= 0 || height <= 0 || (long) width * height > 8000000L) {
             finishError(call, "WebDriverException", "Browser viewport has no valid screenshot size");
@@ -652,6 +670,8 @@ public final class BrowserKernel {
     private void forget(Pending call) {
         pending.remove(call.id);
         evaluations.remove(call.id);
+        ScreenshotWait screenshot = screenshotWaits.remove(call.id);
+        if (screenshot != null) screenshot.cancel();
         if (call.owner != null) {
             call.owner.waitingForRoot.remove(call);
             if (call.owner.navigation == call) call.owner.navigation = null;
@@ -776,6 +796,104 @@ public final class BrowserKernel {
             result = value.toString();
             finished = true;
             latch.countDown();
+        }
+    }
+    /** Wait for the DOM's next draw to reach the Window before PixelCopy. */
+    private final class ScreenshotWait {
+        final Pending call;
+        final Tab tab;
+        final Runnable visibilityCheck;
+        final Runnable timeout;
+        final Runnable copy;
+        ViewTreeObserver observer;
+        Runnable commit;
+        ViewTreeObserver.OnDrawListener draw;
+        boolean done;
+        boolean drawQueued;
+
+        ScreenshotWait(Pending call, Tab tab) {
+            this.call = call;
+            this.tab = tab;
+            copy = this::capture;
+            timeout = () -> {
+                if (!done) finishError(call, "TimeoutException", "Browser screenshot did not render in time");
+            };
+            visibilityCheck = new Runnable() {
+                @Override public void run() {
+                    if (!active()) return;
+                    // A tab hidden while awaiting a frame will not commit one.
+                    if (!tab.view.isShown()) capture();
+                    else ui.postDelayed(this, 50);
+                }
+            };
+        }
+
+        void start() {
+            ui.postDelayed(timeout, call.timeoutMs);
+            ui.postDelayed(visibilityCheck, 50);
+            try {
+                tab.view.postVisualStateCallback(0, new WebView.VisualStateCallback() {
+                    @Override public void onComplete(long id) { awaitFrame(); }
+                });
+                tab.view.invalidate();
+            } catch (RuntimeException failure) {
+                finishError(call, "WebDriverException", "Unable to synchronize the WebView screenshot");
+            }
+        }
+
+        boolean active() {
+            if (done) return false;
+            if (call.finished || tab.closed || destroyed) { cancel(); return false; }
+            if (!tab.id.equals(currentWindow)) {
+                finishError(call, "WebDriverException", "Browser window changed before the screenshot");
+                return false;
+            }
+            return true;
+        }
+
+        void awaitFrame() {
+            if (!active()) return;
+            if (!tab.view.isShown()) { capture(); return; }
+            try {
+                observer = tab.view.getViewTreeObserver();
+                if (Build.VERSION.SDK_INT >= 29 && tab.view.isHardwareAccelerated()) {
+                    // VisualStateCallback means ready for the NEXT draw, not
+                    // that PixelCopy's current Window buffer has that draw.
+                    commit = () -> ui.post(copy);
+                    observer.registerFrameCommitCallback(commit);
+                } else {
+                    draw = () -> {
+                        if (!drawQueued) {
+                            drawQueued = true;
+                            // Leave onDraw before removing its listener or copying.
+                            ui.post(copy);
+                        }
+                    };
+                    observer.addOnDrawListener(draw);
+                }
+                tab.view.invalidate();
+            } catch (RuntimeException failure) {
+                finishError(call, "WebDriverException", "Unable to wait for the WebView drawing pass");
+            }
+        }
+
+        void capture() {
+            if (!active()) return;
+            cancel();
+            captureScreenshot(call, tab);
+        }
+
+        void cancel() {
+            if (done) return;
+            done = true;
+            screenshotWaits.remove(call.id);
+            ui.removeCallbacks(timeout);
+            ui.removeCallbacks(visibilityCheck);
+            ui.removeCallbacks(copy);
+            if (observer != null && observer.isAlive()) {
+                if (Build.VERSION.SDK_INT >= 29 && commit != null) observer.unregisterFrameCommitCallback(commit);
+                if (draw != null) observer.removeOnDrawListener(draw);
+            }
         }
     }
     private static final class Frame {

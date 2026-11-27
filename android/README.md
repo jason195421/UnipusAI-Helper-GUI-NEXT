@@ -134,6 +134,8 @@ python scripts/build_android.py --prepare-only
 
 ## 验证命令与范围
 
+2026-11-28 本地验证：Debug APK 已构建并安装到 Android 15（API 35、x86_64、WebView 124.0.6367.219）模拟器，10 项离线 WebView 仪器测试全部通过，包括跨域 iframe、HttpOnly Cookie、连续三种画面的截图同步和原生 AES 解密。主界面另已检查登录页加载、键盘避让、快速切页、未保存输入保留，以及深色模式和动画设置保存后重启。尚未验证真实手机、真实账号的课程流程或全部题型。
+
 以下 Python / JavaScript 检查不需要真实账号、课程或网络服务：
 
 ```bash

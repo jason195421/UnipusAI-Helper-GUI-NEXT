@@ -6,11 +6,18 @@ import android.widget.FrameLayout;
 
 /** Debug-only local browser fixture. It never starts Python or reads config. */
 public final class BrowserKernelHarnessActivity extends Activity {
+    public static final String FIXTURE_URL = "https://fixture.invalid/";
     private BrowserKernel kernel;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         FrameLayout container = new FrameLayout(this);
+        container.setFitsSystemWindows(true);
+        container.setOnApplyWindowInsetsListener((view, insets) -> {
+            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                    insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            return insets.consumeSystemWindowInsets();
+        });
         setContentView(container);
         kernel = new BrowserKernel(this, container, new BrowserKernel.Listener() {
             @Override public void onPageState(String url, boolean loading) { }
@@ -24,8 +31,10 @@ public final class BrowserKernelHarnessActivity extends Activity {
 
     public void loadFixture(String html) {
         kernel.getCurrentView().getSettings().setBlockNetworkLoads(true);
+        // A null historyUrl is exposed as about:blank by WebView.getUrl(),
+        // even when the content has an HTTPS base URL and origin.
         kernel.getCurrentView().loadDataWithBaseURL(
-                "https://fixture.invalid/", html, "text/html", "UTF-8", null);
+                FIXTURE_URL, html, "text/html", "UTF-8", FIXTURE_URL);
     }
 
     @Override public void onDestroy() {

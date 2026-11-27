@@ -4,6 +4,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.util.Base64;
+import android.util.Log;
 import android.webkit.WebView;
 import android.webkit.WebSettings;
 
@@ -19,8 +20,10 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -146,30 +149,68 @@ public final class BrowserKernelTest {
     }
 
     @Test(timeout = 30000) public void capturesRealViewportPng() throws Exception {
-        CountDownLatch visual = new CountDownLatch(1);
         int[] viewport = new int[2];
+        AtomicReference<String> geometry = new AtomicReference<>();
         scenario.onActivity(activity -> {
             WebView view = kernel.getCurrentView();
             viewport[0] = view.getWidth(); viewport[1] = view.getHeight();
-            view.postVisualStateCallback(1, new WebView.VisualStateCallback() {
-                @Override public void onComplete(long id) { visual.countDown(); }
-            });
+            int[] location = new int[2]; view.getLocationInWindow(location);
+            geometry.set("viewport=" + view.getWidth() + "x" + view.getHeight()
+                    + ", windowPosition=" + Arrays.toString(location) + ", insets=" + view.getRootWindowInsets());
         });
-        assertTrue("WebView did not commit its visual state", visual.await(5, TimeUnit.SECONDS));
-        byte[] bytes = Base64.decode((String) value("screenshot"), Base64.DEFAULT);
-        assertArrayEquals(new byte[]{(byte) 137, 80, 78, 71, 13, 10, 26, 10}, Arrays.copyOf(bytes, 8));
-        Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-        assertNotNull(bitmap);
+        for (String color : new String[]{"#123456", "#4B286D", "#276044"}) {
+            // No wait or test-side visual callback: native screenshot must wait
+            // for this exact DOM change, not copy a cached/previous Window frame.
+            value("evaluate", "script", "document.documentElement.style.background=arguments[0];"
+                    + "document.body.style.background=arguments[0]; return true;", "args", new JSONArray().put(color));
+            byte[] bytes = Base64.decode((String) value("screenshot"), Base64.DEFAULT);
+            assertArrayEquals(new byte[]{(byte) 137, 80, 78, 71, 13, 10, 26, 10}, Arrays.copyOf(bytes, 8));
+            Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            assertNotNull(bitmap);
+            String diagnostic = geometry.get() + ", bitmap=" + bitmap.getWidth() + "x" + bitmap.getHeight()
+                    + ", expected=" + color + ", bottomRight="
+                    + Integer.toHexString(bitmap.getPixel(bitmap.getWidth() - 8, bitmap.getHeight() - 8))
+                    + ", center=" + Integer.toHexString(bitmap.getPixel(bitmap.getWidth() / 2, bitmap.getHeight() / 2));
+            try {
+                assertEquals(diagnostic, viewport[0], bitmap.getWidth());
+                assertEquals(diagnostic, viewport[1], bitmap.getHeight());
+                int pixel = bitmap.getPixel(bitmap.getWidth() - 8, bitmap.getHeight() - 8);
+                int expected = Color.parseColor(color);
+                assertTrue("Screenshot is not the actual fixture page: " + diagnostic,
+                        Math.abs(Color.red(pixel) - Color.red(expected))
+                        + Math.abs(Color.green(pixel) - Color.green(expected))
+                        + Math.abs(Color.blue(pixel) - Color.blue(expected)) < 40);
+            } catch (AssertionError failure) {
+                saveScreenshotFailure(bytes, diagnostic);
+                throw failure;
+            } finally { bitmap.recycle(); }
+        }
+    }
+
+    private void saveScreenshotFailure(byte[] png, String diagnostic) {
+        Log.e("UnipusScreenshotTest", diagnostic);
         try {
-            assertEquals(viewport[0], bitmap.getWidth()); assertEquals(viewport[1], bitmap.getHeight());
-            int pixel = bitmap.getPixel(bitmap.getWidth() - 8, bitmap.getHeight() - 8);
-            assertTrue("Screenshot is not the actual fixture page", Math.abs(Color.red(pixel) - 18)
-                    + Math.abs(Color.green(pixel) - 52) + Math.abs(Color.blue(pixel) - 86) < 40);
-        } finally { bitmap.recycle(); }
+            AtomicReference<File> directory = new AtomicReference<>();
+            scenario.onActivity(activity -> directory.set(activity.getExternalFilesDir("test-diagnostics")));
+            File target = directory.get();
+            if (target == null || (!target.isDirectory() && !target.mkdirs())) return;
+            try (FileOutputStream output = new FileOutputStream(new File(target, "viewport-failure.png"))) { output.write(png); }
+            try (FileOutputStream output = new FileOutputStream(new File(target, "viewport-failure.txt"))) {
+                output.write(diagnostic.getBytes(StandardCharsets.UTF_8));
+            }
+            Log.e("UnipusScreenshotTest", "Failure artifacts: " + target.getAbsolutePath());
+        } catch (Exception failure) { Log.e("UnipusScreenshotTest", "Unable to save screenshot diagnostics", failure); }
     }
 
     @Test(timeout = 30000) public void readsRealHttpOnlyCookiesWithoutInventingMetadata() throws Exception {
+        assertEquals("The fixture must expose its HTTPS history URL to the native cookie API",
+                BrowserKernelHarnessActivity.FIXTURE_URL, value("url"));
+        assertEquals("https://fixture.invalid", value("evaluate", "script", "return location.origin;"));
         String name = "unipus_fixture_" + System.nanoTime();
+        JSONObject wrongDomain = request("add_cookie", "cookie", new JSONObject()
+                .put("name", name).put("value", "rejected").put("domain", "other.invalid"));
+        assertFalse(wrongDomain.toString(), wrongDomain.getBoolean("ok"));
+        assertEquals("InvalidCookieDomainException", wrongDomain.getJSONObject("error").getString("name"));
         JSONObject cookie = new JSONObject().put("name", name).put("value", "native-cookie-value")
                 .put("httpOnly", true).put("secure", true).put("path", "/");
         value("add_cookie", "cookie", cookie);

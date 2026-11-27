@@ -6,12 +6,14 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.ViewGroup;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.Button;
@@ -119,6 +121,16 @@ public final class MainActivity extends Activity implements BrowserKernel.Listen
         getWindow().setStatusBarColor(canvas);
         getWindow().setNavigationBarColor(canvas);
         getWindow().getDecorView().setSystemUiVisibility(dark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().getDecorView().post(() -> {
+                WindowInsetsController controller = getWindow().getInsetsController();
+                if (controller != null) {
+                    int lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                    controller.setSystemBarsAppearance(dark ? 0 : lightBars, lightBars);
+                }
+            });
+        }
     }
 
     private void buildChrome() {
@@ -409,7 +421,10 @@ public final class MainActivity extends Activity implements BrowserKernel.Listen
 
     @Override public void onPageState(String url, boolean loading) {
         if (page.equals("browser")) {
-            try { subtitle.setText((loading ? "正在加载 · " : "") + android.net.Uri.parse(url).getHost()); }
+            try {
+                String host = android.net.Uri.parse(url).getHost();
+                if (host != null && !host.isEmpty()) subtitle.setText((loading ? "正在加载 · " : "") + host);
+            }
             catch (Exception ignored) { }
         }
     }
