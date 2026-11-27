@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       create_release:
-        description: 'Publish the signed installer and portable build to a GitHub Release'
+        description: 'Publish the installer and portable build to a GitHub Release'
         type: boolean
         default: false
   push:
@@ -93,7 +93,7 @@ jobs:
           PYTHONUTF8: '1'
           PYTHONIOENCODING: utf-8:backslashreplace
 
-      - name: Upload unsigned payload for packaging jobs
+      - name: Upload payload for packaging jobs
         uses: actions/upload-artifact@v4
         with:
           name: windows-payload-${{ matrix.mode }}
@@ -111,7 +111,7 @@ jobs:
           if-no-files-found: ignore
 
   portable:
-    name: Package signed portable build (${{ matrix.mode }})
+    name: Package portable build (${{ matrix.mode }})
     needs: build-payload
     runs-on: windows-2022
     strategy:
@@ -133,17 +133,6 @@ jobs:
         with:
           name: windows-payload-${{ matrix.mode }}
           path: dist
-
-      - name: Sign and verify program binaries
-        shell: pwsh
-        run: |
-          $folder = if ($env:BUILD_MODE -eq 'debug') { 'UnipusAI-Helper-Debug' } else { 'UnipusAI-Helper' }
-          $certificate = Join-Path "dist/$folder" 'UnipusAI-Helper-CodeSigning.cer'
-          ./scripts/sign_windows.ps1 -Path "dist/$folder" -ExportCertificatePath $certificate -RequireSigning
-        env:
-          BUILD_MODE: ${{ matrix.mode }}
-          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
-          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
 
       - name: Create compressed portable ZIP
         shell: pwsh
@@ -160,7 +149,7 @@ jobs:
           compression-level: 0
 
   installer:
-    name: Package signed installer (${{ matrix.mode }})
+    name: Package installer (${{ matrix.mode }})
     needs: build-payload
     runs-on: windows-2022
     strategy:
@@ -183,17 +172,6 @@ jobs:
           name: windows-payload-${{ matrix.mode }}
           path: dist
 
-      - name: Sign and verify program binaries
-        shell: pwsh
-        run: |
-          $folder = if ($env:BUILD_MODE -eq 'debug') { 'UnipusAI-Helper-Debug' } else { 'UnipusAI-Helper' }
-          $certificate = Join-Path "dist/$folder" 'UnipusAI-Helper-CodeSigning.cer'
-          ./scripts/sign_windows.ps1 -Path "dist/$folder" -ExportCertificatePath $certificate -RequireSigning
-        env:
-          BUILD_MODE: ${{ matrix.mode }}
-          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
-          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
-
       - name: Install Inno Setup 6
         shell: pwsh
         run: |
@@ -207,18 +185,6 @@ jobs:
         run: python scripts/build_variant.py --mode $env:BUILD_MODE --installer-only --package-target installer
         env:
           BUILD_MODE: ${{ matrix.mode }}
-
-      - name: Sign and verify installer
-        shell: pwsh
-        run: |
-          $setup = Get-ChildItem -Path installer -Filter "*Setup*win-x64-$($env:BUILD_MODE).exe" |
-            Select-Object -First 1
-          if (-not $setup) { throw 'Setup.exe missing before signing' }
-          ./scripts/sign_windows.ps1 -Path $setup.FullName -RequireSigning
-        env:
-          BUILD_MODE: ${{ matrix.mode }}
-          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
-          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
@@ -248,7 +214,7 @@ jobs:
           path: release-assets/installer
           merge-multiple: true
 
-      - name: Publish signed Windows packages
+      - name: Publish Windows packages
         uses: softprops/action-gh-release@v2
         with:
           files: |

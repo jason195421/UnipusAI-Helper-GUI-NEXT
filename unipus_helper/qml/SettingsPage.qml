@@ -78,7 +78,7 @@ Rectangle {
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 4
-            UiText { text: "设置"; font.pixelSize: 28; font.weight: Font.DemiBold; Layout.fillWidth: true }
+            UiText { text: page.firstRun ? "开始配置" : "偏好与连接"; font.pixelSize: 19; font.weight: Font.DemiBold; Layout.fillWidth: true }
             UiText {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
@@ -103,8 +103,8 @@ Rectangle {
                 width: formScroll.availableWidth
                 spacing: 14
 
-                UiText { text: "账号与登录"; font.pixelSize: 15; font.weight: Font.DemiBold; color: Theme.accent; Layout.fillWidth: true; Layout.topMargin: 4 }
-                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.line }
+                UiText { text: "账号与登录"; font.pixelSize: 15; font.weight: Font.DemiBold; color: Theme.ink; Layout.fillWidth: true; Layout.topMargin: 4 }
+                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.subtleLine }
 
                 RowLayout {
                     Layout.fillWidth: true; spacing: 16
@@ -122,8 +122,8 @@ Rectangle {
                     ConfigField { id: urlField; objectName: "cfg_url"; placeholderText: "SSO 登录地址" }
                 }
 
-                UiText { text: "AI 接口"; font.pixelSize: 15; font.weight: Font.DemiBold; color: Theme.accent; Layout.fillWidth: true; Layout.topMargin: 10 }
-                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.line }
+                UiText { text: "AI 接口"; font.pixelSize: 15; font.weight: Font.DemiBold; color: Theme.ink; Layout.fillWidth: true; Layout.topMargin: 10 }
+                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.subtleLine }
 
                 RowLayout {
                     Layout.fillWidth: true; spacing: 16
@@ -151,8 +151,8 @@ Rectangle {
                     ConfigField { id: temperatureField; objectName: "cfg_temperature"; placeholderText: "0.3" }
                 }
 
-                UiText { text: "录音题、浏览器与高级"; font.pixelSize: 15; font.weight: Font.DemiBold; color: Theme.accent; Layout.fillWidth: true; Layout.topMargin: 10 }
-                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.line }
+                UiText { text: "录音题、浏览器与高级"; font.pixelSize: 15; font.weight: Font.DemiBold; color: Theme.ink; Layout.fillWidth: true; Layout.topMargin: 10 }
+                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.subtleLine }
 
                 RowLayout {
                     Layout.fillWidth: true; spacing: 16
@@ -212,7 +212,7 @@ Rectangle {
                         font.pixelSize: 13
                         leftPadding: 12; rightPadding: 12; topPadding: 8; bottomPadding: 8
                         background: Rectangle {
-                            radius: Theme.radiusSm; color: Theme.raised; border.width: 1
+                            radius: Theme.radiusSm; color: tokenField.activeFocus ? Theme.surface : Theme.field; border.width: tokenField.activeFocus ? 2 : 1
                             border.color: tokenField.activeFocus ? Theme.accent : Theme.line
                         }
                     }
@@ -235,10 +235,12 @@ Rectangle {
             }
         }
 
+        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.subtleLine }
+
         RowLayout {
             Layout.fillWidth: true; spacing: 12
             UiText { id: statusText; text: ""; color: Theme.muted; font.pixelSize: 13; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            ActionButton { objectName: "saveSettings"; text: "保存设置"; iconName: "check"; primary: true; implicitHeight: 40; onClicked: page.saveValues() }
+            ActionButton { objectName: "saveSettings"; text: "保存设置"; iconName: "check"; primary: true; implicitWidth: 128; implicitHeight: 40; onClicked: page.saveValues() }
         }
     }
 }

@@ -10,7 +10,7 @@ Button {
     property bool accented: false
     property string iconName: ""
     property string hint: ""
-    implicitHeight: 36
+    implicitHeight: 38
     implicitWidth: contentItem.implicitWidth + leftPadding + rightPadding
     leftPadding: 14
     rightPadding: 14
@@ -19,11 +19,12 @@ Button {
     font.pixelSize: 13
     background: Rectangle {
         radius: Theme.radiusSm
-        color: control.primary ? (control.down || control.hovered ? Theme.accentPressed : Theme.accentFill)
+        color: control.primary ? (control.down ? Theme.accentPressed : control.hovered ? Theme.accentHover : Theme.accentFill)
              : control.down ? Theme.hover : control.hovered ? Theme.raised
              : control.quiet ? "transparent" : Theme.surface
         border.width: control.primary || control.quiet ? 0 : 1
         border.color: control.activeFocus ? Theme.accent : Theme.line
+        Behavior on color { ColorAnimation { duration: 120 } }
         Rectangle {
             anchors.fill: parent
             anchors.margins: -2
@@ -39,7 +40,7 @@ Button {
     HoverHandler { enabled: control.enabled; cursorShape: Qt.PointingHandCursor }
     contentItem: RowLayout {
         spacing: 8
-        Icon { name: control.iconName || "list"; visible: control.iconName !== ""; white: control.primary; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
+        Icon { name: control.iconName || "list"; visible: control.iconName !== ""; onAccent: control.primary; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
         UiText { text: control.text; font.pixelSize: 13; font.weight: Font.Medium; color: control.primary ? Theme.accentInk : control.destructive ? Theme.error : control.accented ? Theme.accent : Theme.ink; Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter }
     }
 }

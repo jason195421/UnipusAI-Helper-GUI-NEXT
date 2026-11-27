@@ -183,7 +183,12 @@ ApplicationWindow {
                         text: window.currentPage === 2 ? "设置" : window.currentPage === 1 ? "运行日志" : workbench.activeUnit === "all" ? "全部课程任务" : workbench.activeUnit
                         font.pixelSize: window.compactHeight ? 28 : 30; font.weight: Font.DemiBold; Layout.fillWidth: true
                     }
-                    UiText { visible: window.currentPage === 0 && summary.unitTitle !== ""; text: summary.unitTitle; color: Theme.secondary; font.pixelSize: 13; Layout.fillWidth: true }
+                    UiText {
+                        text: window.currentPage === 2 ? "管理账号、接口与任务偏好"
+                            : window.currentPage === 1 ? "查看任务执行记录与诊断信息"
+                            : summary.unitTitle !== "" ? summary.unitTitle : "浏览课程进度，选择需要处理的任务"
+                        color: Theme.secondary; font.pixelSize: 13; Layout.fillWidth: true
+                    }
                 }
                 AccountSummary {
                     visible: !window.setupMode
@@ -277,7 +282,7 @@ ApplicationWindow {
                                 Keys.onReturnPressed: window.focusFirstTask()
                                 Keys.onEnterPressed: window.focusFirstTask()
                                 Keys.onDownPressed: window.focusFirstTask()
-                                background: Rectangle { radius: Theme.radiusSm; color: Theme.raised; border.width: 1; border.color: searchInput.activeFocus ? Theme.accent : Theme.line }
+                                background: Rectangle { radius: Theme.radiusSm; color: searchInput.activeFocus ? Theme.surface : Theme.field; border.width: searchInput.activeFocus ? 2 : 1; border.color: searchInput.activeFocus ? Theme.accent : Theme.line }
                                 Icon { x: 8; anchors.verticalCenter: parent.verticalCenter; name: "search"; width: 16; height: 16 }
                                 ActionButton { objectName: "clearSearch"; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; width: 28; height: 28; leftPadding: 6; rightPadding: 6; visible: searchInput.text !== ""; quiet: true; iconName: "close"; Accessible.name: "清空搜索"; hint: "清空搜索（Esc）"; onClicked: { searchInput.clear(); searchInput.forceActiveFocus() } }
                             }
@@ -352,7 +357,7 @@ ApplicationWindow {
                     Rectangle {
                         visible: window.width >= 1100; width: 28; height: 28; radius: Theme.radiusSm
                         color: window.busy ? Theme.navigation : summary.selected > 0 ? Theme.accentFill : Theme.raised
-                        Icon { anchors.centerIn: parent; name: window.busy ? "play" : "check"; width: 20; height: 20; white: true; visible: window.busy || summary.selected > 0 }
+                        Icon { anchors.centerIn: parent; name: window.busy ? "play" : "check"; width: 20; height: 20; onAccent: !window.busy && summary.selected > 0; visible: window.busy || summary.selected > 0 }
                     }
                     ColumnLayout {
                         Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 4
@@ -393,6 +398,7 @@ ApplicationWindow {
                 visible: window.currentPage === 2
                 firstRun: window.setupMode
                 Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 0
+                Layout.bottomMargin: 16
             }
         }
     }

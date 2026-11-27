@@ -7,10 +7,13 @@ TextField {
     id: fieldControl
     Layout.fillWidth: true
     Layout.minimumWidth: 0
-    implicitHeight: 36
+    implicitHeight: 40
+    hoverEnabled: true
     selectByMouse: true
     color: Theme.ink
     placeholderTextColor: Theme.muted
+    selectionColor: Theme.navigation
+    selectedTextColor: Theme.ink
     font.family: Theme.fontFamily
     font.pixelSize: 13
     font.hintingPreference: Font.PreferFullHinting
@@ -19,8 +22,10 @@ TextField {
     rightPadding: 12
     background: Rectangle {
         radius: Theme.radiusSm
-        color: Theme.raised
-        border.width: 1
-        border.color: fieldControl.activeFocus ? Theme.accent : Theme.line
+        color: fieldControl.activeFocus ? Theme.surface : Theme.field
+        border.width: fieldControl.activeFocus ? 2 : 1
+        border.color: fieldControl.activeFocus ? Theme.accent : fieldControl.hovered ? Theme.muted : Theme.line
+        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on border.color { ColorAnimation { duration: 120 } }
     }
 }

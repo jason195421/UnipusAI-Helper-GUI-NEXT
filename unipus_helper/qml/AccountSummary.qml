@@ -77,7 +77,7 @@ Rectangle {
                         font.pixelSize: 12
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
-                        color: identity.apiTesting ? Theme.muted : identity.apiOk ? "#45d579" : identity.apiFail ? Theme.error : Theme.secondary
+                        color: identity.apiTesting ? Theme.muted : identity.apiOk ? Theme.success : identity.apiFail ? Theme.error : Theme.secondary
                     }
                     ToolTip.visible: hovered
                     ToolTip.text: identity.apiTesting ? "正在检测模型接口连通性" : (identity.apiStatus && identity.apiStatus !== "未检测" ? identity.apiStatus + "（点击重新测试）" : "点击测试模型 API 连通性")
