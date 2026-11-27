@@ -18,5 +18,7 @@
   "tts_proxy": "",
   "screenshot": false,
   "answer_api_enabled": true,
+  "theme_mode": "system",
+  "animations_enabled": true,
   "browser": "edge"
 }

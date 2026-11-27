@@ -18,7 +18,7 @@ from shiboken6 import delete as delete_qt_object
 from .accuracy_control import parse_target_accuracy
 from .paths import PROJECT_ROOT, QML_DIR
 from .platform_theme import register_platform_theme
-from .settings import SettingsBridge
+from .settings import SettingsBridge, appearance_preferences, load_config as load_workbench_config
 from .task_grading import score_text
 from .workbench_controller import WorkbenchController
 
@@ -44,6 +44,8 @@ DEFAULT_CONFIG = {
     "browser": "edge",
     "screenshot": False,
     "answer_api_enabled": True,
+    "theme_mode": "system",
+    "animations_enabled": True,
 }
 
 
@@ -110,7 +112,7 @@ class ConfigEditor(QObject):
         data = dict(self.cfg)
         data.update(values)
         for key in DEFAULT_CONFIG:
-            if key in ("debug_mode", "screenshot", "answer_api_enabled"):
+            if key in ("debug_mode", "screenshot", "answer_api_enabled", "animations_enabled"):
                 continue
             if key in data:
                 data[key] = str(data[key]).strip()
@@ -127,6 +129,7 @@ class ConfigEditor(QObject):
         data["debug_mode"] = bool(data.get("debug_mode", False))
         data["screenshot"] = bool(data.get("screenshot", False))
         data["answer_api_enabled"] = config_bool(data.get("answer_api_enabled", True), True)
+        data.update(appearance_preferences(data))
         try:
             data["max_tokens"] = int(data["max_tokens"])
         except (ValueError, TypeError):
@@ -444,7 +447,7 @@ class NativeModernGUI(WorkbenchController):
         app.setWindowIcon(QIcon(str(QML_DIR / "icons" / "app.svg")))
         # Register the platform singleton BEFORE the engine loads Main.qml so
         # Theme.qml can pick the WinUI 3 / macOS palette from the first frame.
-        platform = register_platform_theme()
+        platform = register_platform_theme(**appearance_preferences(load_workbench_config()))
         app.styleHints().setColorScheme(platform.color_scheme())
         configure_ui_font(app)
         log_path = PROJECT_ROOT / "logs" / "native-ui.log"
@@ -534,7 +537,7 @@ def run_setup_mode(*, close_after=None):
     app.setApplicationName("UnipusAI-Helper")
     app.setOrganizationName("UnipusAI-Helper")
     app.setWindowIcon(QIcon(str(QML_DIR / "icons" / "app.svg")))
-    platform = register_platform_theme()
+    platform = register_platform_theme(**appearance_preferences(load_workbench_config()))
     app.styleHints().setColorScheme(platform.color_scheme())
     configure_ui_font(app)
 

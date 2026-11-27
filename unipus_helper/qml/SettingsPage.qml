@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import UnipusAI.Platform 1.0
 
 // 工作台内置「设置」页：替代原来的独立 PyQt5 / Fluent 配置编辑器。
 // 与主界面共用 PySide6 / Qt Quick 及 Theme 单例，只发布一个程序。
@@ -58,11 +59,13 @@ Rectangle {
             "tts_proxy": ttsProxyField.text,
             "browser": browserField.text,
             "screenshot": screenshotCheck.checked,
-            "answer_api_enabled": answerApiCheck.checked
+            "answer_api_enabled": answerApiCheck.checked,
+            "theme_mode": PlatformInfo.themeMode,
+            "animations_enabled": PlatformInfo.animationsEnabled
         })
         statusText.text = ok
             ? (page.firstRun ? "配置已保存，窗口即将关闭，请重新启动程序。"
-                             : "已保存到 config.json，重启程序后生效。")
+                             : "设置已保存。外观已生效，其余设置重启后生效。")
             : "保存失败，请检查程序目录是否可写。"
         statusText.color = ok ? Theme.success : Theme.error
         if (ok) Qt.callLater(page.loadValues)
@@ -86,7 +89,7 @@ Rectangle {
                 font.pixelSize: 13
                 text: page.firstRun
                     ? "首次使用：请填写 U 校园账号与 AI 接口信息，点击「保存设置」后重新启动程序。"
-                    : "配置保存在程序目录的 config.json；修改后点击保存，重启程序后生效。"
+                    : "外观可即时预览，点击保存后保留；其他设置重启后生效。"
             }
         }
 
@@ -103,7 +106,50 @@ Rectangle {
                 width: formScroll.availableWidth
                 spacing: 14
 
-                UiText { text: "账号与登录"; font.pixelSize: 15; font.weight: Font.DemiBold; color: Theme.ink; Layout.fillWidth: true; Layout.topMargin: 4 }
+                UiText { text: "外观与动效"; font.pixelSize: 15; font.weight: Font.DemiBold; color: Theme.ink; Layout.fillWidth: true; Layout.topMargin: 4 }
+                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.subtleLine }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 16
+                    ColumnLayout {
+                        Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 4
+                        UiText { text: "深色模式"; font.pixelSize: 14; font.weight: Font.Medium; Layout.fillWidth: true }
+                        UiText {
+                            Layout.fillWidth: true; wrapMode: Text.Wrap; font.pixelSize: 12; color: Theme.muted
+                            text: PlatformInfo.themeOverridden ? "主题由启动环境固定"
+                                : PlatformInfo.themeMode === "system" ? "正在跟随系统外观" : "已手动选择" + (Theme.dark ? "深色" : "浅色") + "外观"
+                        }
+                    }
+                    ActionButton {
+                        objectName: "followSystemTheme"; text: "跟随系统"; quiet: true; accented: true
+                        enabled: !PlatformInfo.themeOverridden && PlatformInfo.themeMode !== "system"
+                        onClicked: settings.previewAppearance("system", PlatformInfo.animationsEnabled)
+                    }
+                    UiSwitch {
+                        objectName: "darkModeSwitch"; checked: Theme.dark
+                        enabled: !PlatformInfo.themeOverridden
+                        Accessible.name: "深色模式"; hint: "切换浅色与深色外观，点击保存后保留"
+                        onToggled: settings.previewAppearance(checked ? "dark" : "light", PlatformInfo.animationsEnabled)
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 16
+                    ColumnLayout {
+                        Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 4
+                        UiText { text: "界面动画"; font.pixelSize: 14; font.weight: Font.Medium; Layout.fillWidth: true }
+                        UiText {
+                            Layout.fillWidth: true; wrapMode: Text.Wrap; font.pixelSize: 12; color: Theme.muted
+                            text: !PlatformInfo.animationsEnabled ? "已关闭页面和控件的过渡效果"
+                                : PlatformInfo.reducedMotion ? "系统或启动设置要求减少动态效果，动画暂不播放" : "页面切换、按钮反馈和进度平滑过渡"
+                        }
+                    }
+                    UiSwitch {
+                        objectName: "animationsSwitch"; checked: PlatformInfo.animationsEnabled
+                        Accessible.name: "界面动画"; hint: "开启或关闭界面过渡效果，点击保存后保留"
+                        onToggled: settings.previewAppearance(PlatformInfo.themeMode, checked)
+                    }
+                }
+
+                UiText { text: "账号与登录"; font.pixelSize: 15; font.weight: Font.DemiBold; color: Theme.ink; Layout.fillWidth: true; Layout.topMargin: 10 }
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.subtleLine }
 
                 RowLayout {

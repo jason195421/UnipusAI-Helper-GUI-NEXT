@@ -39,6 +39,8 @@ DEFAULT_CONFIG = {
     "tts_proxy": "",
     "screenshot": False,
     "answer_api_enabled": True,
+    "theme_mode": "system",
+    "animations_enabled": True,
     # 浏览器后端：edge（默认）/ chrome，见 unipus_helper/browser.py
     "browser": "edge",
 }
@@ -60,7 +62,20 @@ def load_config():
             cfg.update(data)
     except (OSError, ValueError, TypeError):
         pass
+    cfg.update(appearance_preferences(cfg))
     return cfg
+
+
+def appearance_preferences(data):
+    """Normalize just appearance fields, including configs written by older UI."""
+    mode = str(data.get("theme_mode", "system")).strip().lower()
+    enabled = data.get("animations_enabled", True)
+    if isinstance(enabled, str):
+        enabled = enabled.strip().lower() not in ("false", "0", "off", "no")
+    return {
+        "theme_mode": mode if mode in ("system", "light", "dark") else "system",
+        "animations_enabled": True if enabled is None else bool(enabled),
+    }
 
 
 def _as_text(value, default=""):
@@ -109,6 +124,7 @@ def normalize_config(data):
         out[key] = value is True or (
             isinstance(value, str) and value.casefold() == "true"
         )
+    out.update(appearance_preferences(data))
     return out
 
 
@@ -155,8 +171,16 @@ class SettingsBridge(QObject):
         except Exception as exc:
             self.failed.emit(str(exc))
             return False
+        self.previewAppearance(**appearance_preferences(data))
         self.saved.emit()
         return True
+
+    @Slot(str, bool)
+    def previewAppearance(self, theme_mode, animations_enabled):
+        """Apply appearance without saving other fields or ending first-run setup."""
+        from .platform_theme import set_appearance
+
+        set_appearance(theme_mode, animations_enabled)
 
     @Slot(result=bool)
     def isReady(self):

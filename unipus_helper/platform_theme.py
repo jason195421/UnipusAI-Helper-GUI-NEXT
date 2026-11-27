@@ -7,8 +7,8 @@ One QML codebase serves three looks:
 * Linux    -> neutral dark fallback
 
 The chosen palette is exposed to QML as a registered singleton
-(import UnipusAI.Platform 1.0).  Values are resolved once at startup;
-set UNIPUS_THEME=dark|light (or UNIPUS_ACCENT=#rrggbb) to override.
+(import UnipusAI.Platform 1.0). Appearance preferences can change at runtime;
+set UNIPUS_THEME=dark|light (or UNIPUS_ACCENT=#rrggbb) to override them.
 Motion follows Qt's accessibility hints when available; set
 UNIPUS_REDUCED_MOTION=1 to disable nonessential animation on any Qt version.
 """
@@ -18,7 +18,7 @@ import os
 import subprocess
 import sys
 
-from PySide6.QtCore import Property, QObject, Qt, Signal
+from PySide6.QtCore import Property, QObject, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QFontDatabase, QGuiApplication
 from PySide6.QtQml import qmlRegisterSingletonInstance
 
@@ -124,13 +124,22 @@ class PlatformInfo(QObject):
     """
 
     reducedMotionChanged = Signal()
+    themeChanged = Signal()
+    animationsChanged = Signal()
 
     def __init__(self, dark: bool | None = None, accent: str | None = None,
-                 parent=None):
+                 parent=None, *, theme_mode: str = "system",
+                 animations_enabled: bool = True):
         super().__init__(parent)
-        self._dark = _system_dark() if dark is None else bool(dark)
-        self._accent = (accent or os.environ.get("UNIPUS_ACCENT") or
-                        default_accent(self._dark))
+        override = (os.environ.get("UNIPUS_THEME") or "").strip().lower()
+        self._theme_override = (
+            "dark" if override in ("dark", "1", "true") else
+            "light" if override in ("light", "0", "false") else ""
+        )
+        self._theme_mode = self._normalize_theme_mode(theme_mode)
+        self._dark = self._resolve_dark(self._theme_mode) if dark is None else bool(dark)
+        self._accent = accent or os.environ.get("UNIPUS_ACCENT") or ""
+        self._animations_enabled = bool(animations_enabled)
         self._family = ui_font_family()
         self._force_reduced_motion = os.environ.get(
             "UNIPUS_REDUCED_MOTION", ""
@@ -150,6 +159,32 @@ class PlatformInfo(QObject):
 
     def _motion_preference_changed(self, *_):
         self.reducedMotionChanged.emit()
+
+    @staticmethod
+    def _normalize_theme_mode(value):
+        mode = str(value).strip().lower()
+        return mode if mode in ("system", "light", "dark") else "system"
+
+    def _resolve_dark(self, mode):
+        if self._theme_override:
+            return self._theme_override == "dark"
+        return _system_dark() if mode == "system" else mode == "dark"
+
+    @Slot(str, bool)
+    def setAppearance(self, theme_mode, animations_enabled):
+        mode = self._normalize_theme_mode(theme_mode)
+        dark = self._resolve_dark(mode) if mode != self._theme_mode else self._dark
+        if mode != self._theme_mode or dark != self._dark:
+            self._theme_mode = mode
+            self._dark = dark
+            app = QGuiApplication.instance()
+            if app is not None:
+                app.styleHints().setColorScheme(self.color_scheme())
+            self.themeChanged.emit()
+        enabled = bool(animations_enabled)
+        if enabled != self._animations_enabled:
+            self._animations_enabled = enabled
+            self.animationsChanged.emit()
 
     @Property(bool, notify=reducedMotionChanged)
     def reducedMotion(self):
@@ -174,33 +209,45 @@ class PlatformInfo(QObject):
     def isLinux(self):
         return not (is_windows() or is_macos())
 
-    @Property(bool, constant=True)
+    @Property(bool, notify=themeChanged)
     def dark(self):
         return self._dark
 
-    @Property(QColor, constant=True)
-    def accent(self):
-        return QColor(self._accent)
+    @Property(str, notify=themeChanged)
+    def themeMode(self):
+        return self._theme_mode
 
-    @Property(QColor, constant=True)
+    @Property(bool, constant=True)
+    def themeOverridden(self):
+        return bool(self._theme_override)
+
+    @Property(bool, notify=animationsChanged)
+    def animationsEnabled(self):
+        return self._animations_enabled
+
+    @Property(QColor, notify=themeChanged)
+    def accent(self):
+        return QColor(self._accent or default_accent(self._dark))
+
+    @Property(QColor, notify=themeChanged)
     def accentFill(self):
-        c = QColor(self._accent)
+        c = QColor(self._accent or default_accent(self._dark))
         return c.darker(112) if self._dark else c
 
-    @Property(QColor, constant=True)
+    @Property(QColor, notify=themeChanged)
     def accentPressed(self):
-        c = QColor(self._accent)
+        c = QColor(self._accent or default_accent(self._dark))
         return c.lighter(112) if self._dark else c.darker(118)
 
-    @Property(str, constant=True)
+    @Property(str, notify=themeChanged)
     def accentHex(self):
-        return self._accent
+        return self._accent or default_accent(self._dark)
 
     @Property(str, constant=True)
     def family(self):
         return self._family
 
-    @Property(str, constant=True)
+    @Property(str, notify=themeChanged)
     def themeId(self):
         if is_windows():
             return "winui3-dark" if self._dark else "winui3-light"
@@ -216,11 +263,22 @@ _PLATFORM_INFO = None
 _REGISTERED = False
 
 
-def register_platform_theme(dark: bool | None = None, accent: str | None = None):
+def set_appearance(theme_mode: str, animations_enabled: bool):
+    """Preview preferences only when a GUI has registered the singleton."""
+    if _PLATFORM_INFO is not None:
+        _PLATFORM_INFO.setAppearance(theme_mode, animations_enabled)
+
+
+def register_platform_theme(dark: bool | None = None, accent: str | None = None,
+                            *, theme_mode: str = "system",
+                            animations_enabled: bool = True):
     """Register (once) the singleton and return it; keeps Python ownership."""
     global _PLATFORM_INFO, _REGISTERED
     if _PLATFORM_INFO is None:
-        _PLATFORM_INFO = PlatformInfo(dark=dark, accent=accent)
+        _PLATFORM_INFO = PlatformInfo(
+            dark=dark, accent=accent, theme_mode=theme_mode,
+            animations_enabled=animations_enabled,
+        )
     if not _REGISTERED:
         qmlRegisterSingletonInstance(
             PlatformInfo, URI, 1, 0, TYPE_NAME, _PLATFORM_INFO
