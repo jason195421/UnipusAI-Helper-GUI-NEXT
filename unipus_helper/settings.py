@@ -9,6 +9,9 @@ ships as one program, one window and one process.
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
+import tempfile
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
@@ -132,8 +135,20 @@ def save_config(data):
     """Write config.json next to the executable. Raises on IO errors."""
     out = normalize_config(data)
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with CONFIG_PATH.open("w", encoding="utf-8") as handle:
-        json.dump(out, handle, indent=2, ensure_ascii=False)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=CONFIG_PATH.parent,
+            prefix=".config-", suffix=".tmp", delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            json.dump(out, handle, indent=2, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, CONFIG_PATH)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
     return True
 
 
