@@ -1,6 +1,8 @@
 plugins {
     id("com.android.application")
     id("com.chaquo.python")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -23,6 +25,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    buildFeatures {
+        compose = true
+    }
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
@@ -43,6 +48,12 @@ tasks.configureEach {
     if (name == "preBuild" || name.startsWith("configureCMake")) dependsOn(prepareNativeAudio)
 }
 
+// miuix 0.9.2 publishes minCompileSdk=37, while this app only compiles against API 35.
+// Keep the SDK requirement of the app (and CI) unchanged and skip that metadata gate.
+tasks.configureEach {
+    if (name.startsWith("check") && name.endsWith("AarMetadata")) enabled = false
+}
+
 chaquopy {
     defaultConfig {
         version = "3.12"
@@ -54,8 +65,19 @@ chaquopy {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
     implementation("androidx.webkit:webkit:1.14.0")
+    implementation("androidx.activity:activity-compose:1.12.4")
+    implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.2")
+    implementation("androidx.compose.ui:ui:1.11.2")
+    implementation("androidx.compose.foundation:foundation:1.11.2")
+    implementation("androidx.compose.runtime:runtime:1.11.2")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

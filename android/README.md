@@ -15,7 +15,7 @@
 
 | 功能 | 安卓实现与边界 |
 | --- | --- |
-| 界面 | 「课程浏览器」「任务」「日志」「设置」四个原生触屏页面，保留深色模式、跟随系统和动画开关。 |
+| 界面 | 「课程浏览器」「任务」「日志」「设置」四个触屏页面，使用 miuix（Compose）组件重做，保留深色模式、跟随系统和动画开关。 |
 | 浏览器 | 应用内 WebView；通过逐 frame 的消息代理执行脚本，提供元素查询、输入、点击、iframe 和窗口切换等兼容接口，不启动桌面 WebDriver 可执行文件。 |
 | 登录 | 可填写账号密码自动登录，也可直接在内置网页手动登录；验证码和人机验证仍由用户完成。 |
 | 任务 | 复用现有目录扫描、选择、筛选、开始 / 停止和文本题目处理逻辑。真实网站页面变化仍可能需要调整选择器。 |
@@ -26,6 +26,12 @@
 | 语音设置 | 展示系统 TTS / 离线语音与本地模型状态，支持英语试听、模型下载进度与取消。录音/朗读开关保存后需重新加载浏览器；不会在启动时自动下载模型或语音数据。 |
 | 手动网页录音 | 可由用户申请应用麦克风权限，再逐次允许网页使用麦克风；是否可录音仍受页面与系统 WebView 支持情况影响。 |
 | 后台运行 | 没有持续后台任务服务。处理任务时保持应用在前台；切到后台或系统回收后，不保证自动化持续执行。 |
+
+## 界面实现
+
+界面由 [miuix](https://github.com/miuix-kotlin-multiplatform/miuix) 的 Compose 组件（`top.yukonga.miuix.kmp:miuix-ui`）构建，页面结构为 `Scaffold` + `TopAppBar`（标题与状态副标题）+ `NavigationBar`（四个页签，图标为 `res/drawable/ic_tab_*.xml` 自绘矢量）+ 页面内容；弹窗统一使用 `OverlayDialog`，卡片使用 `Card`，列表行使用 `BasicComponent`。主题颜色在 `ui/Palette.kt` 中按原有的浅色 / 深色配色映射到 miuix 的 `lightColorScheme()` / `darkColorScheme()`。
+
+Java 侧仍是控制器：`MainActivity` 负责 WebView 内核、Chaquopy 运行时、语音与模型导入，只通过公开方法接收界面动作；`ui/UiBridge.kt` 把控制器状态发布为 Compose 可观察快照，`ui/UnipusApp.kt`、`ui/SettingsPage.kt` 是四个页面的 Compose 实现。浏览器仍是同一份 `BrowserKernel` 的 WebView，用 `AndroidView` 承载，不重建内核。
 
 ## 安装与使用
 
@@ -96,7 +102,9 @@
 
 在仓库根目录执行命令，而不是在手机上执行。构建机需要 Python 3.12；已有工具链时还需要 JDK 17、Gradle 8.13，以及 Android SDK 的 `platform-tools`、`platforms;android-35`、`build-tools;35.0.0`、`ndk;28.2.13676358` 和 `cmake;3.22.1`。运行 JavaScript 单测时另需 Node.js。
 
-Android 工程使用 Chaquopy 嵌入 CPython 3.12；具体 Android Gradle Plugin、Chaquopy 和 WebKit 版本固定在 `android/build.gradle.kts`、`android/app/build.gradle.kts`。无需安装整个桌面版 `requirements.txt` 来打包安卓应用。
+Android 工程使用 Chaquopy 嵌入 CPython 3.12；具体 Android Gradle Plugin、Chaquopy、Kotlin、Compose 和 WebKit 版本固定在 `android/build.gradle.kts`、`android/app/build.gradle.kts`。无需安装整个桌面版 `requirements.txt` 来打包安卓应用。
+
+界面使用 Kotlin + Compose，因此构建机需要 Kotlin 2.4.x 与 Compose 编译器插件（由 Gradle 按 `libs` 之外声明的版本自动解析）。`compileSdk` 仍为 35：miuix 0.9.x 的 AAR 元数据声明 `minCompileSdk=37`，而本工程的 SDK 与 CI 只安装 API 35，所以 `android/app/build.gradle.kts` 里显式关闭了 `*AarMetadata` 检查任务，仅跳过这条元数据门槛，不改动实际编译目标。若以后把 SDK 提到 37，可以删除该绕过。
 
 Gradle 的本地音频准备任务会调用 `scripts/prepare_android_audio.py`，下载并校验固定版本的 whisper.cpp 源码及 LGPL FFmpeg 共享库与对应源码。下载缓存放在 `.tools/android-audio/`，生成输入放在 `android/app/build/`；NDK 为两种 ABI 构建 JNI 接口。APK 内使用共享库，不需要执行手机上无法运行的桌面命令。模型数据不随构建脚本从用户目录复制，仍由应用内的明确下载操作获取。
 
