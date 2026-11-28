@@ -53,6 +53,8 @@ import java.util.concurrent.Executors;
 
 /** Touch UI and in-process Python automation. No PC or localhost server required. */
 public final class MainActivity extends Activity implements BrowserKernel.Listener {
+    private static final String DEFAULT_LOGIN_URL = "https://ucloud.unipus.cn/home";
+    private static final String LEGACY_DEFAULT_LOGIN_URL = "https://uai.unipus.cn/sso/index.html?service=https%3A%2F%2Fucloud.unipus.cn%2Fhome";
     private static final int MODEL_PICK_REQUEST = 72;
     private static final long MODEL_IMPORT_BYTES = 77704715L;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -129,12 +131,16 @@ public final class MainActivity extends Activity implements BrowserKernel.Listen
     private JSONObject readConfig() {
         try {
             File file = new File(getFilesDir(), "config.json");
-            if (file.isFile()) return new JSONObject(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+            if (file.isFile()) {
+                JSONObject saved = new JSONObject(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+                if (LEGACY_DEFAULT_LOGIN_URL.equals(saved.optString("url"))) put(saved, "url", DEFAULT_LOGIN_URL);
+                return saved;
+            }
         } catch (Exception ignored) { }
         JSONObject defaults = new JSONObject();
         put(defaults, "theme_mode", "system"); put(defaults, "animations_enabled", true);
         put(defaults, "tts_engine", "android"); put(defaults, "skip_record_mode", "off");
-        put(defaults, "url", "https://uai.unipus.cn/sso/index.html?service=https%3A%2F%2Fucloud.unipus.cn%2Fhome");
+        put(defaults, "url", DEFAULT_LOGIN_URL);
         return defaults;
     }
 

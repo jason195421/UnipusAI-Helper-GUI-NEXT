@@ -31,6 +31,7 @@ class FakeDriver:
     def __init__(self, bridge):
         self.bridge, self.authenticated, self.closed = bridge, False, False
         self.current_url = "https://ucloud.unipus.cn/home"
+        self.home_rendered = False
         self.switch_to = SimpleNamespace(default_content=lambda: None)
         self.scripts = []
 
@@ -51,6 +52,9 @@ class FakeDriver:
         self.bridge.document_scripts.clear()
         self.bridge.events.append(("quit",))
 
+    def render_home(self):
+        self.home_rendered = True
+
 
 class FakeBot:
     def __init__(self, path, *, skip_check, driver_factory):
@@ -68,6 +72,10 @@ class FakeBot:
     @staticmethod
     def _has_live_auth(driver):
         return driver.authenticated
+
+    @staticmethod
+    def _home_ready(driver):
+        return driver.authenticated and driver.home_rendered
 
     def request_shutdown(self):
         self.closed = True
@@ -178,6 +186,32 @@ class AndroidRuntimeTests(unittest.TestCase):
         self.assertFalse(state["capabilities"]["localWhisper"])
         self.assertNotIn("fixture-secret", runtime.snapshot())
 
+    def test_default_login_starts_from_the_official_portal(self):
+        expected = "https://ucloud.unipus.cn/home"
+        self.assertEqual(runtime.DEFAULT_LOGIN_URL, expected)
+        self.assertEqual(runtime.DEFAULT_CONFIG["url"], expected)
+        for changes in ({}, {"url": ""}, {"url": None}):
+            with self.subTest(changes=changes):
+                self.assertEqual(runtime._normalize_config(changes)["url"], expected)
+
+    def test_exact_legacy_default_migrates_and_preserves_other_fields(self):
+        legacy = "https://uai.unipus.cn/sso/index.html?service=https%3A%2F%2Fucloud.unipus.cn%2Fhome"
+        extra = {"nested": ["keep", 7]}
+        self.initialize(url=legacy, custom_fixture=extra)
+        saved = json.loads((self.private / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["url"], "https://ucloud.unipus.cn/home")
+        self.assertEqual(saved["custom_fixture"], extra)
+        self.assertEqual(runtime._current.bot.config.url, "https://ucloud.unipus.cn/home")
+
+    def test_custom_login_urls_are_preserved_without_broad_sso_rewriting(self):
+        for url in ("https://login.example.invalid/custom?service=fixture",
+                    runtime.LEGACY_DEFAULT_LOGIN_URL + "&custom=1",
+                    "https://ucloud.unipus.cn/custom-home?fixture=1"):
+            with self.subTest(url=url):
+                config = runtime._normalize_config({"url": url, "custom_fixture": "keep"})
+                self.assertEqual(config["url"], url)
+                self.assertEqual(config["custom_fixture"], "keep")
+
     def test_audio_bootstrap_registered_before_login_and_capabilities_are_actual(self):
         state = self.initialize()
         active = runtime._current
@@ -257,6 +291,8 @@ class AndroidRuntimeTests(unittest.TestCase):
         driver.current_url = "https://example.invalid/"
         self.assertFalse(json.loads(runtime.command("mark_ready"))["ok"])
         driver.current_url = "https://ucloud.unipus.cn/home"
+        self.assertFalse(json.loads(runtime.command("mark_ready"))["ok"])
+        driver.render_home()
         self.assertTrue(json.loads(runtime.command("mark_ready"))["ok"])
         self.assertTrue(json.loads(runtime.snapshot())["ready"])
         self.assertTrue(runtime._current.watcher_started)

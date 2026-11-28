@@ -18,7 +18,8 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 
-DEFAULT_LOGIN_URL = "https://uai.unipus.cn/sso/index.html?service=https%3A%2F%2Fucloud.unipus.cn%2Fhome"
+DEFAULT_LOGIN_URL = "https://ucloud.unipus.cn/home"
+LEGACY_DEFAULT_LOGIN_URL = "https://uai.unipus.cn/sso/index.html?service=https%3A%2F%2Fucloud.unipus.cn%2Fhome"
 DEFAULT_CONFIG = {
     "username": "", "password": "", "url": DEFAULT_LOGIN_URL,
     "api_key": "", "base_url": "", "model": "", "token_full": "",
@@ -74,6 +75,8 @@ def _normalize_config(data):
     for name in ("username", "url", "api_key", "base_url", "model"):
         out[name] = out[name].strip()
     out["url"] = out["url"] or DEFAULT_LOGIN_URL
+    if out["url"] == LEGACY_DEFAULT_LOGIN_URL:
+        out["url"] = DEFAULT_LOGIN_URL
     for name in ("url", "base_url"):
         if out[name] and urlsplit(out[name]).scheme not in ("http", "https"):
             raise ValueError(f"{name} 必须是 HTTP 或 HTTPS 地址")
@@ -179,7 +182,7 @@ def _authenticated(runtime):
     driver.switch_to.default_content()
     url = urlsplit(driver.current_url)
     return (url.scheme == "https" and url.hostname == "ucloud.unipus.cn"
-            and bool(runtime.bot._has_live_auth(driver)))
+            and bool(runtime.bot._home_ready(driver)))
 
 
 def _login_worker(runtime):

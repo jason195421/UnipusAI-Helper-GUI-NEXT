@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.unipus.helper"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "3.9.19-android.2"
+        versionCode = 3
+        versionName = "3.9.19-android.3"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         externalNativeBuild {
             cmake { arguments += "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON" }
