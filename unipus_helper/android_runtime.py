@@ -26,14 +26,15 @@ DEFAULT_CONFIG = {
     "record_score_threshold": 70, "score_threshold": 80,
     "target_accuracy": "100", "browser": "chrome",
     "theme_mode": "system", "animations_enabled": True,
-    # This APK does not carry desktop speech engines or a local Whisper model.
-    "tts_engine": "off", "skip_record_mode": "all", "screenshot": False,
+    # Android uses its native speech service; model downloads remain explicit.
+    "tts_engine": "android", "skip_record_mode": "off", "screenshot": False,
     "answer_api_enabled": True,
 }
 CAPABILITIES = {
     "standalone": True, "requiresComputer": False,
     "browser": "android-webview", "textAutomation": True,
     "localWhisper": False, "desktopFFmpeg": False, "recordingAutomation": False,
+    "nativeFFmpeg": False, "speechSynthesis": False,
 }
 _STATE_LOCK = threading.RLock()
 _current = None
@@ -95,9 +96,12 @@ def _normalize_config(data):
     out["debug_mode"] = _bool(out.get("debug_mode"))
     out["screenshot"] = _bool(out.get("screenshot"))
     out["answer_api_enabled"] = _bool(out.get("answer_api_enabled"), True)
-    # There is no desktop recorder/PowerShell executable in the Android app.
-    out["tts_engine"] = "off"
-    out["skip_record_mode"] = "all"
+    from .record_skip import normalize_skip_record_mode
+
+    engine = str(out.get("tts_engine") or "android").strip().lower()
+    out["tts_engine"] = "off" if engine in ("off", "none", "disable", "disabled") else "android"
+    out["tts_voice"] = str(out.get("tts_voice") or "").strip()
+    out["skip_record_mode"] = normalize_skip_record_mode(out.get("skip_record_mode"))
     out["browser"] = "chrome"
     return out
 
@@ -147,6 +151,7 @@ def _empty_snapshot(error=""):
         "apiTesting": False, "apiStatus": "未检测", "apiOk": False, "apiFail": False,
         "progress": {"completed": 0, "total": 0},
         "platform": "android", "capabilities": dict(CAPABILITIES),
+        "audio": {},
         "preferences": _preferences(DEFAULT_CONFIG), "configRestartRequired": False,
     }
 
@@ -209,6 +214,29 @@ def _login_worker(runtime):
             runtime.controller._add_log("浏览器登录失败：" + message, "error")
 
 
+def _refresh_audio(runtime):
+    from . import android_audio
+
+    audio = android_audio.status(voice=runtime.config.get("tts_voice", ""))
+    if not runtime.stopped.is_set():
+        with _STATE_LOCK:
+            runtime.audio_status = audio
+    return audio
+
+
+def _audio_capabilities(runtime):
+    result = dict(CAPABILITIES)
+    audio = runtime.audio_status
+    tts, local = audio.get("tts", {}), audio.get("transcription", {})
+    result.update(recordingAutomation=runtime.recording_ready,
+                  speechSynthesis=tts.get("available") is True,
+                  localWhisper=(local.get("whisperAvailable") is True
+                                and local.get("ffmpegAvailable") is True
+                                and local.get("modelReady") is True),
+                  nativeFFmpeg=local.get("ffmpegAvailable") is True)
+    return result
+
+
 def initialize(bridge, data_dir: str, config_json: str = "{}") -> str:
     """Initialize without waiting for SSO, browser navigation or task work."""
     global _current, _config_path, _boot_error
@@ -241,11 +269,35 @@ def initialize(bridge, data_dir: str, config_json: str = "{}") -> str:
         core.logger = core.setup_logging()
         from .android_driver import AndroidWebDriver
         from .android_crypto import configure as configure_crypto
+        from . import android_audio
         from .workbench_controller import WorkbenchController
 
         configure_crypto(bridge)
+        android_audio.configure(bridge)
+        recording = {"ready": False, "error": ""}
+
+        def create_driver():
+            driver = AndroidWebDriver(bridge)
+            if config["skip_record_mode"] == "all":
+                return driver
+            try:
+                driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                    "source": core.RECORD_MIC_BOOTSTRAP_JS,
+                })
+                recording["ready"] = True
+            except Exception as exc:
+                recording["error"] = _redact(exc, config)
+            if recording["ready"]:
+                try:
+                    # Registration covers future frames; this also covers the
+                    # WebView's initial document before the first navigation.
+                    driver.execute_script(core.RECORD_MIC_BOOTSTRAP_JS)
+                except Exception:
+                    pass
+            return driver
+
         bot = core.UCampusBot(str(_config_path), skip_check=True,
-                             driver_factory=lambda: AndroidWebDriver(bridge))
+                             driver_factory=create_driver)
         solver = core.AISolver(bot.driver, bot.config)
         controller = WorkbenchController(bot.driver, solver, bot, vars(core))
         bot.gui = controller
@@ -253,14 +305,20 @@ def initialize(bridge, data_dir: str, config_json: str = "{}") -> str:
             bridge=bridge, directory=private, core=core, bot=bot,
             controller=controller, config=config, stopped=threading.Event(),
             pending_restart=False, watcher_started=False,
+            audio_status={}, recording_ready=recording["ready"],
         )
         with _STATE_LOCK:
             _current, _boot_error = runtime, ""
         controller._add_log("安卓独立运行：浏览器和文本任务在手机上执行，不需要电脑。", "success")
-        controller._add_log("当前安卓版本跳过录音题；未包含本地 Whisper、桌面 FFmpeg 或 SAPI 语音引擎。", "warning")
+        controller._add_log("录音使用安卓本地语音引擎；本地转写需先在语音设置中下载 Whisper 模型。", "info")
+        if recording["error"]:
+            controller._add_log("录音注入脚本安装失败：" + recording["error"], "warning")
         login = threading.Thread(target=_login_worker, args=(runtime,), daemon=True, name="android-login")
-        bot._background_threads = [login]
+        audio = threading.Thread(target=_refresh_audio, args=(runtime,), daemon=True,
+                                 name="android-audio-status")
+        bot._background_threads = [login, audio]
         login.start()
+        audio.start()
     except Exception as exc:
         if _current is not None:
             shutdown()
@@ -283,7 +341,8 @@ def snapshot() -> str:
     if runtime is None:
         return _json(_empty_snapshot(error))
     state = runtime.controller.snapshot()
-    state.update(platform="android", capabilities=dict(CAPABILITIES),
+    state.update(platform="android", capabilities=_audio_capabilities(runtime),
+                 audio=runtime.audio_status,
                  preferences=_preferences(runtime.config),
                  configRestartRequired=runtime.pending_restart)
     return _json(state)
@@ -303,6 +362,19 @@ def command(action: str, payload_json: str = "{}") -> str:
             result = controller.start_action(action)
         elif action == "stop":
             result = controller.stop()
+            from .android_audio import cancel
+            cancel()
+        elif action == "audio_status":
+            result = {"ok": True, "audio": _refresh_audio(runtime)}
+        elif action == "prepare_audio_model":
+            if controller.snapshot()["busy"]:
+                return _json({"ok": False, "error": "请先停止当前任务，再下载语音模型。"})
+            from .android_audio import prepare_model
+            try:
+                prepared = prepare_model()
+                result = {"ok": True, "model": prepared}
+            finally:
+                _refresh_audio(runtime)
         elif action == "restart":
             if controller.snapshot()["busy"]:
                 return _json({"ok": False, "error": "请先停止当前任务，再重新加载浏览器。"})
@@ -372,7 +444,17 @@ def shutdown() -> None:
     if runtime is None:
         return
     runtime.stopped.set()
+    from . import android_audio
+
     try:
+        android_audio.cancel()
+        try:
+            android_audio.release()
+        except Exception:
+            pass
         runtime.bot.request_shutdown()
     finally:
-        runtime.controller.close()
+        try:
+            runtime.controller.close()
+        finally:
+            android_audio.configure(None)

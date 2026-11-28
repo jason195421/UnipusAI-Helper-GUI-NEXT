@@ -16,6 +16,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from unipus_helper import android_runtime as runtime
+from unipus_helper import android_audio
 
 
 class DeferredThread:
@@ -31,9 +32,24 @@ class FakeDriver:
         self.bridge, self.authenticated, self.closed = bridge, False, False
         self.current_url = "https://ucloud.unipus.cn/home"
         self.switch_to = SimpleNamespace(default_content=lambda: None)
+        self.scripts = []
+
+    def execute_cdp_cmd(self, name, params):
+        self.scripts.append((name, params))
+        self.bridge.document_scripts.append(params["source"])
+        self.bridge.events.append(("register", params["source"]))
+
+    def execute_script(self, source):
+        self.scripts.append(("execute_script", source))
+
+    def get(self, url):
+        self.current_url = url
+        self.bridge.events.append(("navigate", url, tuple(self.bridge.document_scripts)))
 
     def quit(self):
         self.closed = True
+        self.bridge.document_scripts.clear()
+        self.bridge.events.append(("quit",))
 
 
 class FakeBot:
@@ -46,6 +62,7 @@ class FakeBot:
 
     def _login(self):
         self.login_calls += 1
+        self.driver.get("https://example.invalid/fixture-login")
         return False
 
     @staticmethod
@@ -107,6 +124,7 @@ class AndroidRuntimeTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="android-runtime-test-")
         self.private = Path(self.directory.name)
+        self.bridge = SimpleNamespace(document_scripts=[], events=[])
         self.old_tempdir = tempfile.tempdir
         self.old_config_path, self.old_error = runtime._config_path, runtime._boot_error
         self.stack = ExitStack()
@@ -121,7 +139,13 @@ class AndroidRuntimeTests(unittest.TestCase):
         self.core = SimpleNamespace(
             UCampusBot=FakeBot, AISolver=lambda driver, config: SimpleNamespace(config=config),
             setup_logging=lambda: None,
+            RECORD_MIC_BOOTSTRAP_JS="/* fixture virtual microphone */",
         )
+        self.audio_status = {"tts": {"ready": True, "available": True}, "transcription": {
+            "whisperAvailable": True, "ffmpegAvailable": True, "modelReady": False}}
+        self.stack.enter_context(patch.object(android_audio, "status", side_effect=lambda **kwargs: self.audio_status))
+        self.cancel = self.stack.enter_context(patch.object(android_audio, "cancel", return_value={"stopped": True}))
+        self.release = self.stack.enter_context(patch.object(android_audio, "release", return_value={"released": True}))
         self.stack.enter_context(patch.object(runtime.importlib, "import_module", return_value=self.core))
         self.stack.enter_context(patch.object(runtime.threading, "Thread", DeferredThread))
         self.addCleanup(self.cleanup_runtime)
@@ -138,7 +162,7 @@ class AndroidRuntimeTests(unittest.TestCase):
                   "api_key": "fixture-secret", "model": "fixture-model",
                   "base_url": "https://example.invalid/v1"}
         config.update(changes)
-        return json.loads(runtime.initialize(object(), str(self.private), json.dumps(config)))
+        return json.loads(runtime.initialize(self.bridge, str(self.private), json.dumps(config)))
 
     def test_initialize_returns_before_login_and_uses_private_data(self):
         state = self.initialize()
@@ -148,11 +172,82 @@ class AndroidRuntimeTests(unittest.TestCase):
         self.assertTrue(runtime._current.bot._background_threads[0].started)
         self.assertEqual(os.environ["UNIPUS_DATA_DIR"], str(self.private))
         self.assertEqual(os.environ["UNIPUS_ANDROID"], "1")
-        self.assertEqual(runtime._current.config["skip_record_mode"], "all")
-        self.assertEqual(runtime._current.config["tts_engine"], "off")
+        self.assertEqual(runtime._current.config["skip_record_mode"], "off")
+        self.assertEqual(runtime._current.config["tts_engine"], "android")
         self.assertTrue(state["capabilities"]["standalone"])
         self.assertFalse(state["capabilities"]["localWhisper"])
         self.assertNotIn("fixture-secret", runtime.snapshot())
+
+    def test_audio_bootstrap_registered_before_login_and_capabilities_are_actual(self):
+        state = self.initialize()
+        active = runtime._current
+        self.assertEqual(active.bot.driver.scripts, [
+            ("Page.addScriptToEvaluateOnNewDocument", {"source": self.core.RECORD_MIC_BOOTSTRAP_JS}),
+            ("execute_script", self.core.RECORD_MIC_BOOTSTRAP_JS),
+        ])
+        self.assertEqual(active.bot.login_calls, 0)
+        active.bot._login()
+        self.assertEqual(self.bridge.events[-1], (
+            "navigate", "https://example.invalid/fixture-login", (self.core.RECORD_MIC_BOOTSTRAP_JS,)))
+        self.assertTrue(state["capabilities"]["recordingAutomation"])
+        self.assertFalse(state["capabilities"]["localWhisper"])
+        runtime._refresh_audio(active)
+        state = json.loads(runtime.snapshot())
+        self.assertTrue(state["capabilities"]["speechSynthesis"])
+        self.assertTrue(state["capabilities"]["nativeFFmpeg"])
+        self.assertFalse(state["capabilities"]["localWhisper"])
+        self.audio_status["transcription"]["modelReady"] = True
+        self.assertTrue(json.loads(runtime.snapshot())["capabilities"]["localWhisper"])
+
+    def test_skip_all_never_installs_recording_shim_or_reports_install_failure(self):
+        for engine in ("off", "android"):
+            with self.subTest(engine=engine):
+                state = self.initialize(tts_engine=engine, skip_record_mode="all")
+                active = runtime._current
+                self.assertEqual(active.bot.driver.scripts, [])
+                self.assertEqual(self.bridge.document_scripts, [])
+                self.assertFalse(state["capabilities"]["recordingAutomation"])
+                self.assertFalse(any("录音注入脚本安装失败" in message for message, _ in active.controller.logs))
+
+    def test_tts_off_keeps_reference_audio_injection_when_recording_is_enabled(self):
+        state = self.initialize(tts_engine="off", skip_record_mode="off")
+        self.assertEqual(self.bridge.document_scripts, [self.core.RECORD_MIC_BOOTSTRAP_JS])
+        self.assertTrue(state["capabilities"]["recordingAutomation"])
+        self.assertEqual(runtime._current.config["tts_engine"], "off")
+
+    def test_recording_disable_and_reload_clear_previously_installed_scripts(self):
+        self.initialize()
+        old = runtime._current
+        self.assertEqual(self.bridge.document_scripts, [self.core.RECORD_MIC_BOOTSTRAP_JS])
+        saved = json.loads(runtime.save_config('{"tts_engine":"off","skip_record_mode":"all"}'))
+        self.assertTrue(saved["restart_required"])
+        self.assertTrue(json.loads(runtime.command("restart"))["ok"])
+        self.assertTrue(old.bot.driver.closed)
+        self.assertIn(("quit",), self.bridge.events)
+        self.assertEqual(self.bridge.document_scripts, [])
+        self.assertEqual(runtime._current.bot.driver.scripts, [])
+        self.assertFalse(json.loads(runtime.snapshot())["capabilities"]["recordingAutomation"])
+        self.assertFalse(any("录音注入脚本安装失败" in message
+                             for message, _ in runtime._current.controller.logs))
+
+    def test_audio_configuration_preserves_explicit_off_and_skip_choices(self):
+        for engine, skip in (("off", "all"), ("android", "off"), ("edge", "follow_aloud")):
+            config = runtime._normalize_config({"tts_engine": engine, "skip_record_mode": skip})
+            self.assertEqual(config["tts_engine"], "off" if engine == "off" else "android")
+            self.assertEqual(config["skip_record_mode"], skip)
+        with self.assertRaises(ValueError):
+            runtime._normalize_config({"skip_record_mode": "invalid"})
+
+    def test_audio_commands_refresh_models_and_cancel_when_stopping(self):
+        self.initialize()
+        self.assertTrue(json.loads(runtime.command("audio_status"))["ok"])
+        with patch.object(android_audio, "prepare_model", return_value={"modelReady": True}) as prepare:
+            self.assertTrue(json.loads(runtime.command("prepare_audio_model"))["ok"])
+            prepare.assert_called_once()
+        runtime._current.controller.busy = True
+        self.assertFalse(json.loads(runtime.command("prepare_audio_model"))["ok"])
+        self.assertTrue(json.loads(runtime.command("stop"))["ok"])
+        self.cancel.assert_called()
 
     def test_mark_ready_requires_real_site_and_authentication(self):
         self.initialize()
@@ -232,6 +327,8 @@ class AndroidRuntimeTests(unittest.TestCase):
         self.assertTrue(old.stopped.is_set())
         self.assertTrue(old.bot.closed)
         self.assertTrue(old.controller.closed)
+        self.cancel.assert_called()
+        self.release.assert_called()
         self.assertFalse(json.loads(runtime.command("scan"))["ok"])
 
     def test_data_directory_override_requires_an_absolute_path(self):

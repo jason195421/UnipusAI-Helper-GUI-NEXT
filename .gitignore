@@ -38,6 +38,7 @@ whisper_models/*
 # Build toolchains / installer outputs
 .tools/
 .gradle/
+.cxx/
 android/local.properties
 installer/*.exe
 installer/*.zip

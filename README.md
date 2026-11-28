@@ -33,7 +33,7 @@
 - **双版本构建**：桌面平台提供 **release**（纯 GUI、无终端窗口）与 **debug**（保留控制台输出便于排错）两种构建，由 `UNIPUS_BUILD_MODE` 一键切换；release 版启动时自动把标准输出/错误重定向到日志文件，致命错误改为系统弹窗。
 - **安装包发布**：Windows 分开构建 Inno Setup 安装版与便携版；便携 ZIP 使用最高 Deflate 压缩，PyInstaller 可执行文件使用经 SHA-256 校验的 UPX 压缩；macOS 用 `hdiutil` 生成 `.dmg`（release 为可拖入「应用程序」的 `.app`，debug 附带 `Run-Debug.command`）。
 - **双平台自动构建**：`.github/workflows/build-windows.yml` 将 Windows payload、便携版与安装版分开为独立 job；`build-macos.yml` 在 `macos-15`（arm64）/ `macos-15-intel`（x64）上按 debug × release 矩阵构建，打 `v*` 标签时发布到 GitHub Release。macOS 配置与日志写入 `~/Library/Application Support/UnipusAI-Helper/`，保持应用包只读。
-- **Android 独立版（开发验证中）**：原生触屏界面与内置 WebView 在手机上运行，嵌入 Python 复用任务处理逻辑，支持深色模式和动画开关。构建、安装及功能边界见 [安卓说明](android/README.md)；当前不宣称已完成真机或真实课程验证。
+- **Android 独立版（开发验证中）**：原生触屏界面与内置 WebView 在手机上运行，嵌入 Python 复用任务处理逻辑，支持深色模式和动画开关；已接入系统离线英语 TTS、WebAudio 录音注入和 whisper.cpp / FFmpeg 本地转写，模型单独下载。构建、安装、语音依赖与验证边界见 [安卓说明](android/README.md)；当前不宣称已完成真机或真实课程验证。
 
 上面的桌面浏览器、Whisper、FFmpeg 与自动录音能力不全部适用于安卓；安卓版的支持范围以 [安卓说明](android/README.md#当前功能与限制) 为准。
 
@@ -186,7 +186,7 @@ Aqua 风格；同一套 Qt Quick / QML 界面按平台自动切换配色、圆�
 | `temperature` | 否 | 生成温度，保持默认数值即可 |
 | `token_full` | 否 | 认证兜底；支持旧版完整 `__token` JSON 或 U校园 5.0 的 JWT，正常登录时留空 |
 | `debug_mode` | 否 | 是否开启调试日志，默认 `false` |
-| `tts_engine` | 否 | 录音题语音合成后端：`auto`（默认，先 edge 后 sapi）/ `edge` / `sapi` / `off` |
+| `tts_engine` | 否 | 录音题语音合成后端：桌面 `auto`（默认，先 edge 后 sapi）/ `edge` / `sapi` / `off`；安卓 `android` / `off`，需系统英语离线语音。 |
 | `tts_voice` | 否 | TTS 音色；留空用默认英语音色（`en-US-AriaNeural` / 系统英语语音） |
 | `tts_proxy` | 否 | `edge-tts` 需要走代理时填，例如 `http://127.0.0.1:7890`；离线 `sapi` 不需要 |
 | `screenshot` | 否 | 将题目截图发送给模型；图片口语题需开启并使用支持识图的模型，默认关闭 |

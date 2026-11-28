@@ -2478,15 +2478,35 @@ RECORD_MIC_BOOTSTRAP_JS = r"""
   const md = navigator.mediaDevices || (navigator.mediaDevices = {});
   const api = { buf: null, ctx: null, pad: 0.8, calls: 0, dur: 0, srcDur: 0, maxDur: 0 };
   api.ctxOf = function () {
-    const ctx = api.ctx || (api.ctx = new AudioContext());
-    try { ctx.resume(); } catch (e) {}
+    const AudioContextType = window.AudioContext || window.webkitAudioContext;
+    if (typeof AudioContextType !== 'function') {
+      throw new Error('Web Audio API is unavailable');
+    }
+    return api.ctx || (api.ctx = new AudioContextType());
+  };
+  api.ready = async function () {
+    const ctx = api.ctxOf();
+    if (ctx.state === 'closed') { throw new Error('AudioContext is closed'); }
+    if (ctx.state !== 'running') {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('AudioContext did not resume within 5000 ms')), 5000);
+        Promise.resolve().then(() => ctx.resume()).then(
+          () => { clearTimeout(timer); resolve(); },
+          error => { clearTimeout(timer); reject(error); }
+        );
+      });
+    }
+    if (ctx.state !== 'running') {
+      throw new Error('AudioContext is not running: ' + ctx.state);
+    }
     return ctx;
   };
-  api.silent = function () {
-    return api.ctxOf().createMediaStreamDestination().stream;
+  api.silent = async function () {
+    const ctx = await api.ready();
+    return ctx.createMediaStreamDestination().stream;
   };
-  api.stream = function () {
-    const ctx = api.ctxOf();
+  api.stream = async function () {
+    const ctx = await api.ready();
     if (!api.buf) { return ctx.createMediaStreamDestination().stream; }
     const padSec = api.pad || 0;
     const sr = api.buf.sampleRate;
@@ -2515,8 +2535,8 @@ RECORD_MIC_BOOTSTRAP_JS = r"""
     api.dur = buf.duration;
     return dest.stream;
   };
-  md.getUserMedia = function () { return Promise.resolve(api.stream()); };
-  md.getDisplayMedia = md.getDisplayMedia || function () { return Promise.resolve(api.silent()); };
+  md.getUserMedia = function () { return api.stream(); };
+  md.getDisplayMedia = md.getDisplayMedia || function () { return api.silent(); };
   window.__ucRec = api;
 })();
 """
@@ -2529,19 +2549,26 @@ const maxDur = (typeof arguments[2] === 'number') ? arguments[2] : 0;
 (async () => {
   const api = window.__ucRec;
   if (!api) { done({ ok: false, err: 'bootstrap missing' }); return; }
+  if (!Number.isFinite(pad) || pad < 0 || !Number.isFinite(maxDur) || maxDur < 0) {
+    throw new Error('Audio padding and duration must be finite non-negative numbers');
+  }
   api.pad = pad;
   api.maxDur = maxDur;
-  if (!b64) { done({ ok: true, dur: api.dur, srcDur: api.srcDur, pad: pad, reused: true }); return; }
-  const ctx = api.ctxOf();
+  const ctx = await api.ready();
+  if (!b64) { done({ ok: true, dur: api.dur, srcDur: api.srcDur, pad: pad, reused: true, state: ctx.state }); return; }
+  api.buf = null;
+  api.srcDur = 0;
+  api.dur = 0;
   const raw = atob(b64);
   const u8 = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) u8[i] = raw.charCodeAt(i);
   const buf = await ctx.decodeAudioData(u8.buffer);
+  await api.ready();
   api.buf = buf;
   api.srcDur = buf.duration;
   const usable = maxDur > 0 ? Math.min(buf.duration, maxDur) : buf.duration;
   api.dur = usable + pad;
-  done({ ok: true, dur: api.dur, srcDur: api.srcDur, sr: buf.sampleRate, pad: pad, maxDur: maxDur });
+  done({ ok: true, dur: api.dur, srcDur: api.srcDur, sr: buf.sampleRate, pad: pad, maxDur: maxDur, state: ctx.state });
 })().catch((e) => done({ ok: false, err: String(e) }));
 """
 
@@ -2770,7 +2797,7 @@ class TTSEngine:
             self.last_error = "没有可朗读的英文文本"
             return "", b""
 
-        key = hashlib.md5(f"{spoken}|{self.voice}|{self.rate}".encode()).hexdigest()
+        key = hashlib.md5(f"{spoken}|{self.voice}|{self.rate}|{float(max_seconds)}".encode()).hexdigest()
         cached = self._cache.get(key)
         if cached:
             print(f"    TTS 复用缓存（{len(spoken.split())} 词）")
@@ -2778,7 +2805,7 @@ class TTSEngine:
 
         errors = []
         for name in self._engine_order():
-            fmt, data = self._run_engine(name, spoken)
+            fmt, data = self._run_engine(name, spoken, max_seconds=max_seconds)
             if data:
                 if len(self._cache) >= self.CACHE_LIMIT:
                     self._cache.clear()
@@ -2790,14 +2817,19 @@ class TTSEngine:
         return "", b""
 
     def _engine_order(self) -> Tuple[str, ...]:
+        if os.environ.get('UNIPUS_ANDROID') == '1':
+            return ('android',)
         if self.engine in ("sapi", "system", "windows"):
             return ("sapi",)
         if self.engine == "edge":
             return ("edge",)
         return ("edge", "sapi")
 
-    def _run_engine(self, name: str, text: str) -> Tuple[str, bytes]:
+    def _run_engine(self, name: str, text: str, max_seconds: float = 110.0) -> Tuple[str, bytes]:
         try:
+            if name == 'android':
+                from unipus_helper.android_audio import synthesize
+                return synthesize(text, voice=self.voice, rate=self.rate, max_seconds=max_seconds)
             if name == "edge":
                 return self._synth_edge(text)
             return self._synth_sapi(text)

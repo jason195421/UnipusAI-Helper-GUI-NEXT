@@ -73,6 +73,8 @@ public final class BrowserKernel {
     private final Activity activity;
     private final FrameLayout container;
     private final Listener listener;
+    private final AndroidAudioEngine audio;
+    private final AndroidSpeechNative speech;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final Map<String, Tab> tabs = new LinkedHashMap<>();
     private final Map<String, Pending> pending = new LinkedHashMap<>();
@@ -91,6 +93,8 @@ public final class BrowserKernel {
         this.activity = activity;
         this.container = container;
         this.listener = listener;
+        this.audio = new AndroidAudioEngine(activity);
+        this.speech = new AndroidSpeechNative(activity);
         this.bootstrap = readAsset("browser_kernel.js");
         this.bridgeSupported = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
                 && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT);
@@ -120,6 +124,14 @@ public final class BrowserKernel {
         // Crypto is native-only and stays on this worker; web-message callbacks
         // never dispatch operations and cannot reach this entry point.
         if ("aes_decrypt".equals(call.op)) return decryptAes(call.data);
+        if (call.op.startsWith("tts_")) {
+            if (destroyed) return error("InvalidSessionIdException", "Browser session was closed").toString();
+            return audio.callJson(call.data, call.timeoutMs);
+        }
+        if (call.op.startsWith("audio_")) {
+            if (destroyed) return error("InvalidSessionIdException", "Browser session was closed").toString();
+            return speech.callJson(call.data.toString());
+        }
         if (!ui.post(() -> dispatch(call))) {
             return error("InvalidSessionIdException", "Browser UI is unavailable").toString();
         }
@@ -188,6 +200,8 @@ public final class BrowserKernel {
         requireUi();
         if (destroyed) return;
         destroyed = true;
+        audio.destroy();
+        speech.destroy();
         documentScripts.clear();
         for (Tab tab : new ArrayList<>(tabs.values())) closeTab(tab);
         for (Pending call : new ArrayList<>(pending.values())) {
@@ -200,6 +214,7 @@ public final class BrowserKernel {
         pending.put(call.id, call);
         try {
             if ("quit".equals(call.op)) {
+                audio.stop();
                 // Python can restart its browser session using this same Activity.
                 for (Tab tab : new ArrayList<>(tabs.values())) closeTab(tab);
                 documentScripts.clear();

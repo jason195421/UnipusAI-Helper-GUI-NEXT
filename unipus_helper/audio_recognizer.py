@@ -26,6 +26,15 @@ class AudioTranscriber:
         优先加载随安装包内置的 whisper_models/base.pt（零联网）；仅在内置
         文件缺失时才回退到 whisper 默认的联网下载 / 用户缓存行为。
         """
+        if os.environ.get("UNIPUS_ANDROID") == "1":
+            try:
+                from .android_audio import AndroidWhisperModel
+                self.local_model = AndroidWhisperModel()
+                print("       安卓本地 Whisper 模型已就绪")
+                return
+            except Exception as exc:
+                self._print_exception("       安卓本地语音识别不可用", exc)
+                raise
         try:
             import whisper
             from . import whisper_runtime
@@ -60,7 +69,13 @@ class AudioTranscriber:
     def release_local_model(self) -> None:
         if self.local_model is None:
             return
-        self.local_model = None
+        try:
+            if os.environ.get("UNIPUS_ANDROID") == "1":
+                self.local_model.close()
+        except Exception as exc:
+            self._print_exception("       释放安卓 Whisper 模型失败", exc)
+        finally:
+            self.local_model = None
         gc.collect()
         print("       已释放 Whisper 模型")
 

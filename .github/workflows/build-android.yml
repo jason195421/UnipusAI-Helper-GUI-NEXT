@@ -32,12 +32,14 @@ jobs:
         with:
           gradle-version: '8.13'
       - name: Install Android platform
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
       - name: Verify Python Android adapters
         run: |
           python scripts/verify_android_driver.py -v
           python scripts/verify_android_runtime.py -v
           python scripts/verify_android_crypto.py -v
+          python scripts/verify_android_audio.py -v
+          python scripts/verify_recording_js.py -v
           node scripts/verify_android_kernel.js
       - name: Build APK and instrumentation tests
         run: python scripts/build_android.py --test

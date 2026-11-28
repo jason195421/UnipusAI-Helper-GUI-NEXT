@@ -128,14 +128,14 @@ def install_sdk_packages(sdk, manager, environment):
     """Support both the legacy sdkmanager and the current Android CLI."""
     cli = manager.with_name("android.exe" if os.name == "nt" else "android")
     if cli.is_file():
-        for package in ("platform-tools", "platforms/android-35", "build-tools/35.0.0"):
+        for package in ("platform-tools", "platforms/android-35", "build-tools/35.0.0", "ndk/28.2.13676358", "cmake/3.22.1"):
             subprocess.run(
                 [str(cli), f"--sdk={sdk}", "sdk", "install", package],
                 input="y\n" * 100, text=True, env=environment, check=True,
             )
     else:
         subprocess.run([str(manager), f"--sdk_root={sdk}", "--licenses"], input="y\n" * 100, text=True, env=environment, check=True)
-        subprocess.run([str(manager), f"--sdk_root={sdk}", "platform-tools", "platforms;android-35", "build-tools;35.0.0"], env=environment, check=True)
+        subprocess.run([str(manager), f"--sdk_root={sdk}", "platform-tools", "platforms;android-35", "build-tools;35.0.0", "ndk;28.2.13676358", "cmake;3.22.1"], env=environment, check=True)
     aapt = "aapt2.exe" if os.name == "nt" else "aapt2"
     for required in (sdk / "platforms/android-35/android.jar", sdk / "build-tools/35.0.0" / aapt):
         if not required.is_file():
